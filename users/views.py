@@ -78,10 +78,18 @@ def register(request):
                     with transaction.atomic():
                         user.save()
                 except IntegrityError as ie:
-                    # Likely a race condition on unique phone/email. Add a user-friendly form error
+                    # Likely a race condition on unique phone/email. Inspect message and attach field-specific errors.
                     msg = 'A user with that phone number or email already exists.'
+                    ie_msg = str(ie).lower() if ie else ''
                     logger.warning(f"IntegrityError saving user (likely duplicate): {ie}")
-                    form.add_error('phone_number', msg)
+                    # Decide which field to attach the error to
+                    if 'phone_number' in ie_msg or 'phone' in ie_msg:
+                        form.add_error('phone_number', 'A user with that phone number already exists.')
+                    elif 'email' in ie_msg:
+                        form.add_error('email', 'A user with that email already exists.')
+                    else:
+                        form.add_error(None, msg)
+
                     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
                         return JsonResponse({'success': False, 'errors': form.errors.get_json_data()})
                     messages.error(request, msg)
@@ -189,11 +197,19 @@ def verify_email(request):
         return JsonResponse({'success': False, 'error': f'Invalid code. {attempts_left} attempts remaining.', 'attempts_left': attempts_left})
     return JsonResponse({'success': False, 'error': 'Invalid request.'})
 
+
+
 @csrf_exempt
 def resend_code(request):
-    # Accept POST or GET to be resilient behind proxies or when requests are transformed
-    if request.method in ('POST', 'GET'):
+    try:
+        # Accept POST or GET to be resilient behind proxies or when requests are transformed
+        if request.method not in ('POST', 'GET'):
+            return JsonResponse({'success': False, 'error': 'Invalid request method.'})
+
         user_id = request.POST.get('user_id') or request.GET.get('user_id')
+        if not user_id:
+            return JsonResponse({'success': False, 'error': 'Missing user_id.'})
+
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -206,6 +222,7 @@ def resend_code(request):
             user.verification_attempts_today = 0
             user.last_verification_attempt_date = today
 
+        # Enforce 60s cooldown
         if user.email_verification_sent_at and (now - user.email_verification_sent_at).seconds < 60:
             wait = 60 - (now - user.email_verification_sent_at).seconds
             return JsonResponse({'success': False, 'error': f'Please wait {wait} seconds.', 'wait': wait})
@@ -218,8 +235,9 @@ def resend_code(request):
 
         send_verification_email(user)
         return JsonResponse({'success': True, 'message': 'Code resent.'})
-
-    return JsonResponse({'success': False, 'error': 'Invalid request.'})
+    except Exception as e:
+        logger.exception('Error in resend_code')
+        return JsonResponse({'success': False, 'error': 'Server error while resending code.'})
 
 @login_required
 def verification_required(request):
