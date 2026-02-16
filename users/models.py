@@ -110,6 +110,18 @@ class User(AbstractUser):
         return '/static/images/default_cover_photo.jpg'
 
     def save(self, *args, **kwargs):
+        # Normalize phone_number: store empty values as NULL to avoid UNIQUE '' collisions
+        try:
+            if hasattr(self, 'phone_number'):
+                if isinstance(self.phone_number, str):
+                    pn = self.phone_number.strip()
+                    if pn == '':
+                        self.phone_number = None
+                    else:
+                        self.phone_number = pn
+        except Exception:
+            # non-fatal: ensure save proceeds
+            pass
         if not CLOUDINARY_AVAILABLE and self.profile_picture:
             os.makedirs(os.path.join(settings.MEDIA_ROOT, 'profile_pics'), exist_ok=True)
         if not self.first_name:

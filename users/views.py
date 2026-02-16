@@ -82,6 +82,16 @@ def register(request):
                     msg = 'A user with that phone number or email already exists.'
                     ie_msg = str(ie).lower() if ie else ''
                     logger.warning(f"IntegrityError saving user (likely duplicate): {ie}")
+                    # Log any existing users with the same phone/email to aid debugging
+                    try:
+                        if phone:
+                            qs = User.objects.filter(phone_number=phone).values_list('id', 'phone_number')
+                            logger.info('Existing users with same phone: %s', list(qs))
+                        if user.email:
+                            qs2 = User.objects.filter(email__iexact=user.email).values_list('id', 'email')
+                            logger.info('Existing users with same email: %s', list(qs2))
+                    except Exception:
+                        logger.exception('Failed to log existing duplicates')
                     # Decide which field to attach the error to
                     if 'phone_number' in ie_msg or 'phone' in ie_msg:
                         form.add_error('phone_number', 'A user with that phone number already exists.')
@@ -202,12 +212,49 @@ def verify_email(request):
 @csrf_exempt
 def resend_code(request):
     try:
+        # Diagnostic logging to help debug 502s on Render (capture headers and sizes)
+        try:
+            content_type = request.META.get('CONTENT_TYPE') or request.headers.get('content-type')
+        except Exception:
+            content_type = None
+        try:
+            content_length = int(request.META.get('CONTENT_LENGTH') or 0)
+        except Exception:
+            content_length = 0
+        logger.info(
+            "resend_code called: method=%s content_type=%s content_length=%s remote_addr=%s",
+            request.method,
+            content_type,
+            content_length,
+            request.META.get('REMOTE_ADDR') or request.META.get('HTTP_X_FORWARDED_FOR')
+        )
+
         # Accept POST or GET to be resilient behind proxies or when requests are transformed
         if request.method not in ('POST', 'GET'):
             return JsonResponse({'success': False, 'error': 'Invalid request method.'})
 
-        user_id = request.POST.get('user_id') or request.GET.get('user_id')
+        # Try common places for user_id: POST form, GET query, or raw JSON body
+        user_id = None
+        try:
+            user_id = request.POST.get('user_id') or request.GET.get('user_id')
+        except Exception as e:
+            logger.warning('Could not read request.POST: %s', e)
+
         if not user_id:
+            # Attempt to parse JSON body as fallback
+            try:
+                import json
+                body = request.body.decode('utf-8') if getattr(request, 'body', None) else ''
+                if body:
+                    data = json.loads(body)
+                    user_id = data.get('user_id')
+                    logger.info('resend_code parsed JSON body; keys=%s', list(data.keys()))
+            except Exception:
+                # ignore parse errors; will validate below
+                pass
+
+        if not user_id:
+            logger.info('resend_code missing user_id; content_type=%s content_length=%s', content_type, content_length)
             return JsonResponse({'success': False, 'error': 'Missing user_id.'})
 
         try:
@@ -435,11 +482,12 @@ def google_callback(request):
                 counter += 1
 
             user = User.objects.create(
-                email=email,
+                email=(email or '').lower(),
                 username=username,
                 first_name=userinfo.get('given_name', ''),
                 last_name=userinfo.get('family_name', ''),
                 location='Homabay',
+                phone_number=None,
                 is_active=True   # <-- changed to True
             )
             user.set_unusable_password()
@@ -541,11 +589,12 @@ def facebook_callback(request):
                 counter += 1
 
             user = User.objects.create(
-                email=email,
+                email=(email or '').lower(),
                 username=username,
                 first_name=userinfo.get('first_name', ''),
                 last_name=userinfo.get('last_name', ''),
                 location='Homabay',
+                phone_number=None,
                 is_active=True   # <-- changed to True
             )
             user.set_unusable_password()

@@ -564,6 +564,14 @@
         // do not interfere with add-to-cart forms (they have add-to-cart class)
         if(form.classList.contains('add-to-cart-form') || form.querySelector('.add-to-cart-btn')) return;
 
+        // Prevent duplicate submissions from multiple clicks or network retries
+        if(form.dataset.ajaxSubmitting === '1'){
+            // Already submitting; ignore subsequent submits
+            e.preventDefault();
+            return;
+        }
+        form.dataset.ajaxSubmitting = '1';
+
         e.preventDefault();
 
         const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
@@ -599,21 +607,47 @@
                 return;
             }
 
+            // Defensive JSON parsing: some intermediaries may return HTML with a wrong
+            // content-type or corrupt bodies; parse safely and fallback gracefully.
             if(ct.indexOf('application/json') !== -1){
-                const json = await response.json();
-                // If server asks us to redirect, force a full page reload to that URL
-                if(json.redirect){
-                    window.location.href = json.redirect;
-                    return;
-                }
+                try{
+                    const text = await response.text();
+                    let json = null;
+                    try{ json = JSON.parse(text); }catch(e){
+                        console.warn('Failed to parse JSON response:', e, text);
+                    }
 
-                if(json.success){
-                    window.dispatchEvent(new CustomEvent('ajaxFormSuccess', { detail: json }));
-                    if(window.showToast && json.message){ window.showToast(json.message, 'success'); }
+                    if(json && json.redirect){
+                        window.location.href = json.redirect;
+                        return;
+                    }
+
+                    if(json && json.success){
+                        window.dispatchEvent(new CustomEvent('ajaxFormSuccess', { detail: json }));
+                        if(window.showToast && json.message){ window.showToast(json.message, 'success'); }
+                        return;
+                    }
+
+                    if(json && !json.success){
+                        window.dispatchEvent(new CustomEvent('ajaxFormError', { detail: json }));
+                        if(window.showToast && json.error){ window.showToast(json.error, 'error'); }
+                        return;
+                    }
+
+                    // If we couldn't parse JSON but body looks like HTML, fall back to navigation
+                    const trimmed = (text || '').trim();
+                    if(trimmed && trimmed[0] === '<'){
+                        window.location.href = response.url || action;
+                        return;
+                    }
+
+                    // Last resort: show generic error and reload
+                    console.error('Unexpected non-JSON response for AJAX form', text);
+                    if(window.showToast) window.showToast('Server error. Please try again.', 'error');
                     return;
-                } else {
-                    window.dispatchEvent(new CustomEvent('ajaxFormError', { detail: json }));
-                    if(window.showToast && json.error){ window.showToast(json.error, 'error'); }
+                }catch(e){
+                    console.error('AJAX form JSON handling failed', e);
+                    window.location.href = response.url || action;
                     return;
                 }
             }
@@ -626,33 +660,45 @@
             console.error('AJAX form submit failed', err);
             // On failure, fallback to normal submit once (submit without interception)
             resetFormLoading(form);
-            try{ 
+            try{
+                // Prevent duplicate fallback submissions
+                if(form.dataset._fallbackSubmitted === '1'){
+                    window.location.href = action;
+                    return;
+                }
+                form.dataset._fallbackSubmitted = '1';
+
                 // Create a temporary form for fallback submission
                 const tempForm = document.createElement('form');
-                tempForm.method = form.method;
-                tempForm.action = form.action;
+                tempForm.method = form.method || 'POST';
+                tempForm.action = form.action || action;
                 tempForm.style.display = 'none';
                 
-                // Copy all form data
-                const formData = new FormData(form);
-                for(let [name, value] of formData.entries()){
+                // Copy all form data (skip files)
+                const fd = new FormData(form);
+                for(let [name, value] of fd.entries()){
+                    if(value instanceof File) continue;
                     const input = document.createElement('input');
                     input.type = 'hidden';
                     input.name = name;
-                    if(value instanceof File){
-                        // Can't set File value, skip or handle differently
-                        continue;
-                    }
                     input.value = value;
                     tempForm.appendChild(input);
                 }
-                
+
+                // Copy CSRF token if present as cookie
+                const csrftoken = getCookie('csrftoken');
+                if(csrftoken){
+                    const c = document.createElement('input');
+                    c.type = 'hidden'; c.name = 'csrfmiddlewaretoken'; c.value = csrftoken; tempForm.appendChild(c);
+                }
+
                 document.body.appendChild(tempForm);
                 tempForm.submit();
             }catch(e){ 
                 window.location.href = action; 
             }
         }).finally(() => {
+            try{ delete form.dataset.ajaxSubmitting; }catch(e){}
             resetFormLoading(form);
             hideHorizontalLoader();
         });
