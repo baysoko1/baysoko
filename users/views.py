@@ -37,7 +37,7 @@ import string
 from datetime import timedelta
 from django.utils import timezone
 from django.template.loader import render_to_string
-from django.core.mail import send_mail
+from django.core.mail import send_mail, get_connection, EmailMessage as DjangoEmailMessage
 from django.http import JsonResponse, HttpResponse
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
@@ -150,39 +150,47 @@ def send_verification_email(user):
     # Send email on a background thread to avoid blocking the web worker.
     def _send():
         try:
-            # If Mailtrap SMTP credentials are provided, prefer using Mailtrap (free tier/testing)
-            mailtrap_user = os.environ.get('MAILTRAP_USER') or os.environ.get('MAILTRAP_SMTP_USER') or os.environ.get('MAILTRAP_USERNAME')
-            mailtrap_pass = os.environ.get('MAILTRAP_PASSWORD') or os.environ.get('MAILTRAP_SMTP_PASSWORD') or os.environ.get('MAILTRAP_PASS')
-            if mailtrap_user and mailtrap_pass:
-                mailtrap_host = os.environ.get('MAILTRAP_HOST', 'smtp.mailtrap.io')
-                try:
-                    mailtrap_port = int(os.environ.get('MAILTRAP_PORT', '587'))
-                except Exception:
-                    mailtrap_port = 587
-                mailtrap_tls = str(os.environ.get('MAILTRAP_USE_TLS', 'True')).lower() in ('1', 'true', 'yes')
-                try:
-                    with smtplib.SMTP(mailtrap_host, mailtrap_port, timeout=15) as smtp:
-                        if mailtrap_tls:
-                            smtp.starttls()
-                        smtp.login(mailtrap_user, mailtrap_pass)
-                        msg = EmailMessage()
-                        msg['Subject'] = subject
-                        msg['From'] = settings.DEFAULT_FROM_EMAIL
-                        msg['To'] = user.email
-                        # set plain and html content
-                        try:
-                            msg.set_content(plain_message)
-                            msg.add_alternative(html_message, subtype='html')
-                        except Exception:
-                            # Older Python versions: fallback to minimal plain text
-                            msg.set_content(plain_message)
-                        smtp.send_message(msg)
-                        logger.info('Verification email sent via Mailtrap for user id=%s', getattr(user, 'id', None))
-                        return
-                except Exception:
-                    logger.exception('Mailtrap send failed; falling back to configured EMAIL_BACKEND')
+            # Choose an envelope-from acceptable to the SMTP provider (Brevo).
+            # Priority: explicit env override -> EMAIL_HOST_USER (if email-like) -> DEFAULT_FROM_EMAIL
+            env_override = (
+                os.environ.get('SMTP_ENVELOPE_FROM')
+                or os.environ.get('MAIL_ENVELOPE_FROM')
+                or os.environ.get('MAILTRAP_ENVELOPE_FROM')
+            )
 
-            # Fallback to Django's configured email backend (SMTP, console, etc.)
+            email_host_user = getattr(settings, 'EMAIL_HOST_USER', None)
+            envelope_from = None
+            if env_override:
+                envelope_from = env_override
+            elif email_host_user and '@' in str(email_host_user):
+                envelope_from = email_host_user
+            else:
+                envelope_from = settings.DEFAULT_FROM_EMAIL
+
+            # Use Django's configured email connection (will pick up Brevo settings)
+            try:
+                connection = get_connection()
+                msg = DjangoEmailMessage(
+                    subject=subject,
+                    body=plain_message,
+                    from_email=envelope_from,
+                    to=[user.email],
+                    connection=connection,
+                    headers={'From': settings.DEFAULT_FROM_EMAIL},
+                )
+                try:
+                    msg.attach_alternative(html_message, 'text/html')
+                except Exception:
+                    # If attaching HTML fails, proceed with plain text only
+                    pass
+
+                msg.send(fail_silently=False)
+                logger.info('Verification email sent for user id=%s via connection %s using envelope=%s', getattr(user, 'id', None), type(connection).__name__, envelope_from)
+                return
+            except Exception:
+                logger.exception('Direct send via Django connection failed; falling back to send_mail')
+
+            # Final fallback: Django's send_mail (will also use configured EMAIL_BACKEND)
             send_mail(
                 subject,
                 plain_message,
