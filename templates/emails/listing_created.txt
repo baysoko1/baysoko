@@ -1,0 +1,8 @@
+Hi {{ user.first_name }},
+
+Your listing "{{ listing.title }}" has been created and is now live.
+
+View your listing: {{ site_url }}{% url 'listing-detail' listing.id %}
+
+Thanks,
+Baysoko

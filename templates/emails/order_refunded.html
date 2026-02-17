@@ -1,0 +1,11 @@
+{% extends 'emails/base_email.html' %}
+
+{% block content %}
+<p>Hi {{ user.first_name }},</p>
+
+<p>Your order #{{ order.id }} has been refunded. The refund amount {{ order.total_price }} should reflect in your account shortly.</p>
+
+<p>If you have questions, contact support.</p>
+
+<p>Thanks,<br/>Baysoko</p>
+{% endblock %}

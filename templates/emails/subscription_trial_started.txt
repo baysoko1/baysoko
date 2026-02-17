@@ -1,0 +1,8 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your trial for {{ store.name }} has started and will expire on {{ subscription.trial_ends_at }}.
+
+Enjoy premium features during your trial.
+
+Thanks,
+Baysoko

@@ -1,0 +1,10 @@
+Hi {{ user.first_name }},
+
+Your order #{{ order.id }} has been refunded.
+
+Refund amount: {{ order.total_price }}
+
+If you have questions, contact support.
+
+Thanks,
+Baysoko

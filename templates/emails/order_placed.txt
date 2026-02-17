@@ -1,0 +1,10 @@
+Hi {{ user.first_name }},
+
+Your order #{{ order.id }} has been placed successfully.
+
+Order total: {{ order.total_price }}
+
+View order: {{ site_url }}{% url 'order_detail' order.id %}
+
+Thanks,
+Baysoko

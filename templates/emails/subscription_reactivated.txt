@@ -1,0 +1,6 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your subscription for {{ store.name }} has been reactivated. Welcome back!
+
+Thanks,
+Baysoko

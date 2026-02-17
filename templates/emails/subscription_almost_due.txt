@@ -1,0 +1,6 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your subscription for {{ store.name }} will renew on {{ subscription.current_period_end }} — please ensure your payment method is up to date.
+
+Thanks,
+Baysoko

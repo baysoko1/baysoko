@@ -1,0 +1,6 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+We couldn't collect payment for your subscription to {{ store.name }}. Your subscription is now past due. Please update your payment details.
+
+Thanks,
+Baysoko Billing

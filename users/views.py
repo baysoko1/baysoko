@@ -54,102 +54,8 @@ from listings.models import Listing
 
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------
-#  Email sending helper (Brevo first, SMTP fallback)
-# ----------------------------------------------------------------------
-
-def send_email_brevo(subject, plain_message, html_message, to_emails):
-    """
-    Send an email using Brevo API if available, otherwise fall back to Django SMTP.
-    Runs synchronously – intended to be called from a background thread.
-    """
-    brevo_key = (
-        os.environ.get('BREVO_API_KEY') or
-        os.environ.get('SENDINBLUE_API_KEY') or
-        os.environ.get('SIB_API_KEY')
-    )
-    if not brevo_key:
-        email_host = getattr(settings, 'EMAIL_HOST', '').lower()
-        if 'brevo' in email_host or 'sendinblue' in email_host:
-            brevo_key = os.environ.get('EMAIL_HOST_PASSWORD') or getattr(settings, 'EMAIL_HOST_PASSWORD', None)
-
-    if brevo_key:
-        try:
-            headers = {
-                'accept': 'application/json',
-                'api-key': brevo_key,
-                'content-type': 'application/json',
-            }
-            sender = {
-                'name': os.environ.get('EMAIL_FROM_NAME', 'Baysoko'),
-                'email': settings.DEFAULT_FROM_EMAIL
-            }
-            to = [{'email': email} for email in to_emails]
-            payload = {
-                'sender': sender,
-                'to': to,
-                'subject': subject,
-                'textContent': plain_message,
-                'htmlContent': html_message,
-            }
-            resp = requests.post(
-                'https://api.brevo.com/v3/smtp/email',
-                json=payload,
-                headers=headers,
-                timeout=10
-            )
-            if 200 <= resp.status_code < 300:
-                logger.info('Email sent via Brevo API to %s', to_emails)
-                return
-            logger.warning('Brevo API returned non-2xx: %s %s', resp.status_code, resp.text)
-        except requests.exceptions.SSLError as e:
-            logger.warning('Brevo API SSL error, falling back to SMTP: %s', e)
-        except requests.exceptions.RequestException as e:
-            logger.warning('Brevo API request failed, falling back to SMTP: %s', e)
-        except Exception:
-            logger.exception('Unexpected exception when calling Brevo API; falling back to SMTP')
-
-    # Fallback to SMTP
-    envelope_from = os.environ.get('SMTP_ENVELOPE_FROM') or settings.DEFAULT_FROM_EMAIL
-    try:
-        connection = get_connection()
-        # Use EmailMultiAlternatives which supports HTML alternatives reliably
-        msg = EmailMultiAlternatives(
-            subject=subject,
-            body=plain_message,
-            from_email=envelope_from,
-            to=to_emails,
-            connection=connection,
-            headers={'From': settings.DEFAULT_FROM_EMAIL}
-        )
-        if html_message:
-            msg.attach_alternative(html_message, 'text/html')
-        msg.send(fail_silently=False)
-        logger.info('Email sent via SMTP to %s', to_emails)
-    except Exception:
-        logger.exception('SMTP sending failed, trying send_mail as last resort')
-        send_mail(
-            subject,
-            plain_message,
-            settings.DEFAULT_FROM_EMAIL,
-            to_emails,
-            html_message=html_message,
-            fail_silently=False
-        )
-
-# ----------------------------------------------------------------------
-#  Threaded email senders (non‑blocking)
-# ----------------------------------------------------------------------
-
-def _send_email_threaded(subject, plain_message, html_message, to_emails):
-    """Wrapper to run send_email_brevo in a background thread."""
-    def _send():
-        try:
-            send_email_brevo(subject, plain_message, html_message, to_emails)
-        except Exception:
-            logger.exception('Background email send failed')
-    t = threading.Thread(target=_send, daemon=True)
-    t.start()
+from baysoko.utils.email_helpers import _send_email_threaded, send_email_brevo, render_and_send
+from notifications.utils import notify_system_message
 
 def send_verification_email(user):
     subject = 'Verify your email for Baysoko'
@@ -1044,6 +950,20 @@ def password_reset_set_password(request):
     del request.session['password_reset_verified_email']
     del request.session['password_reset_verified_at']
 
+    # Send confirmation email and in-app notification
+    try:
+        ctx = {'user': user, 'site_url': getattr(settings, 'SITE_URL', '')}
+        subject = 'Your Baysoko password was changed'
+        render_and_send('emails/password_changed.html', 'emails/password_changed.txt', ctx, subject, [user.email])
+    except Exception:
+        logger.exception('Failed to queue password-reset-complete email')
+
+    try:
+        from notifications.utils import notify_system_message
+        notify_system_message(user, 'Password Reset Completed', 'Your account password was successfully reset.')
+    except Exception:
+        logger.exception('Failed to create in-app notification for password reset completion')
+
     return JsonResponse({'success': True, 'message': 'Password changed successfully.'})
 
 # ----------------------------------------------------------------------
@@ -1161,3 +1081,159 @@ class CustomLogoutView(LogoutView):
     def dispatch(self, request, *args, **kwargs):
         messages.success(request, 'You have been logged out.')
         return super().dispatch(request, *args, **kwargs)
+
+# users/views.py
+
+import json
+from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.http import JsonResponse
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_POST
+from .models import AccountDeletionLog
+
+@login_required
+@require_POST
+@ensure_csrf_cookie
+def change_password_ajax(request):
+    """
+    AJAX view to change the logged-in user's password.
+    Expects POST with old_password, new_password1, new_password2.
+    Returns JSON with success or errors.
+    """
+    try:
+        # Prefer JSON when content type is JSON; otherwise fall back to POST
+        content_type = request.META.get('CONTENT_TYPE', '') or request.content_type or ''
+        if 'application/json' in content_type:
+            try:
+                data = json.loads(request.body.decode('utf-8') or '{}')
+            except Exception:
+                data = request.POST
+        else:
+            data = request.POST
+    except Exception:
+        # If the request stream was already consumed elsewhere, fall back
+        data = request.POST
+    old_password = data.get('old_password')
+    new_password1 = data.get('new_password1')
+    new_password2 = data.get('new_password2')
+
+    # Basic field presence check
+    if not old_password or not new_password1 or not new_password2:
+        return JsonResponse({
+            'success': False,
+            'error': 'All fields are required.'
+        }, status=400)
+
+    # Verify old password
+    user = authenticate(username=request.user.username, password=old_password)
+    if user is None:
+        return JsonResponse({
+            'success': False,
+            'error': 'Your old password was entered incorrectly. Please enter it again.'
+        }, status=400)
+
+    # Check that new passwords match
+    if new_password1 != new_password2:
+        return JsonResponse({
+            'success': False,
+            'error': 'The two new password fields didn’t match.'
+        }, status=400)
+
+    # Validate new password against Django's password validators
+    try:
+        validate_password(new_password1, user=request.user)
+    except ValidationError as e:
+        return JsonResponse({
+            'success': False,
+            'errors': {'new_password1': list(e.messages)}
+        }, status=400)
+
+    # All good – set the new password
+    request.user.set_password(new_password1)
+    request.user.save()
+
+    # Keep the user logged in
+    update_session_auth_hash(request, request.user)
+
+    # Send password changed email (non-blocking)
+    try:
+        ctx = {'user': request.user, 'site_url': getattr(settings, 'SITE_URL', '')}
+        subject = 'Your Baysoko password was changed'
+        render_and_send('emails/password_changed.html', 'emails/password_changed.txt', ctx, subject, [request.user.email])
+    except Exception:
+        logger.exception('Failed to queue password-changed email')
+
+    # Create in-app notification
+    try:
+        notify_system_message(request.user, 'Password Changed', 'Your account password was successfully changed.')
+    except Exception:
+        logger.exception('Failed to create in-app password-changed notification')
+
+    return JsonResponse({
+        'success': True,
+        'message': 'Password changed successfully.'
+    })
+
+
+@login_required
+@require_POST
+@ensure_csrf_cookie
+def delete_account_ajax(request):
+    """
+    AJAX view to permanently delete the logged-in user's account.
+    Expects POST with password, reason (optional), reason_other (optional).
+    Returns JSON with success and redirect URL.
+    """
+    try:
+        content_type = request.META.get('CONTENT_TYPE', '') or request.content_type or ''
+        if 'application/json' in content_type:
+            try:
+                data = json.loads(request.body.decode('utf-8') or '{}')
+            except Exception:
+                data = request.POST
+        else:
+            data = request.POST
+    except Exception:
+        data = request.POST
+    password = data.get('password')
+   
+    reason = data.get('reason', '')
+    reason_other = data.get('reason_other', '')
+
+    # Verify password
+    user = authenticate(username=request.user.username, password=password)
+    if user is None:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid password. Please try again.'
+        }, status=400)
+
+    # Optionally log the deletion reason (for analytics or support)
+    if reason:
+        # You could save this to a model, send an email, or write to a log file
+        full_reason = reason_other if reason == 'other' and reason_other else reason
+        # Example: log to console (replace with your own logic)
+        print(f"User {request.user.username} (ID: {request.user.id}) deleted account. Reason: {full_reason}")
+
+    
+    AccountDeletionLog.objects.create(
+        user=user,
+        username=user.username,
+        email=user.email,
+        reason=full_reason
+    )
+
+    # Log out the user before deletion (optional but recommended)
+    logout(request)
+
+    # Delete the user account
+    
+    user.delete()
+
+    return JsonResponse({
+        'success': True,
+        'redirect': '/'  # or any other public URL
+    })

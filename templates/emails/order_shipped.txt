@@ -1,0 +1,11 @@
+Hi {{ user.first_name }},
+
+Great news! Your order #{{ order.id }} has been shipped and is on its way to you.
+
+{% if tracking_url %}Tracking: {{ tracking_url }}
+{% endif %}
+
+Order total: {{ order.total_price }}
+
+Thank you,
+Baysoko

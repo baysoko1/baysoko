@@ -1,0 +1,12 @@
+Hi {{ user.first_name }},
+
+Your listing "{{ listing.title }}" received a new review.
+
+Rating: {{ review.rating }}
+
+"{{ review.comment }}"
+
+View listing: {{ site_url }}{% url 'listing-detail' listing.id %}
+
+Thanks,
+Baysoko

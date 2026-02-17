@@ -47,6 +47,62 @@
             padding-top: env(safe-area-inset-top);
         }
     </style>
+    <script>
+        // Poll notifications endpoint and show new ones as toasts.
+        (function() {
+            const endpoint = '{% url "notifications" %}';
+            const shownKey = 'baysoko_shown_notifications_v1';
+            const pollInterval = 30000; // 30s
+
+            function getShown() {
+                try { return JSON.parse(localStorage.getItem(shownKey) || '[]'); } catch(e) { return []; }
+            }
+            function markShown(id) {
+                const arr = getShown();
+                if (!arr.includes(id)) { arr.push(id); localStorage.setItem(shownKey, JSON.stringify(arr)); }
+            }
+
+            function truncate(text, n=140){ return text && text.length>n ? text.slice(0,n-1)+'…' : text; }
+
+            function showNotifToast(n) {
+                const container = document.querySelector('.toast-container') || (() => { const c=document.createElement('div'); c.className='toast-container'; document.body.appendChild(c); return c; })();
+                const typeMap = {
+                    'system':'primary','order_update':'info','payment_success':'success','payment_failed':'error','review':'info','new_order':'info'
+                };
+                const cls = 'toast-'+(typeMap[n.type]||'info');
+                const div = document.createElement('div');
+                div.className = `custom-toast ${cls} custom-toast-notif`;
+                div.innerHTML = `<i class="bi ${n.type==='payment_failed' || n.type==='error' ? 'bi-exclamation-triangle-fill':'bi-bell-fill'}"></i><div class="fw-medium">${n.title}</div><div style="opacity:.92; font-size:0.85rem; margin-left:.5rem;">${truncate(n.message,120)}</div><div class="toast-progress-bar" style="animation-duration:4s"></div>`;
+                container.appendChild(div);
+                // remove after 4s
+                setTimeout(()=>{ div.style.animation='slideOutRight 0.28s'; setTimeout(()=>div.remove(),280); }, 4000);
+            }
+
+            async function poll() {
+                if (!window.currentUserId) return;
+                try {
+                    const res = await fetch(endpoint, { headers: { 'X-Requested-With':'XMLHttpRequest' } });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const notifications = data.notifications || [];
+                    const shown = getShown();
+                    notifications.reverse(); // oldest first
+                    for (const n of notifications) {
+                        if (!shown.includes(n.id)) {
+                            showNotifToast(n);
+                            markShown(n.id);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Notification poll failed', e);
+                }
+            }
+
+            // initial run and interval
+            setTimeout(poll, 1500);
+            setInterval(poll, pollInterval);
+        })();
+    </script>
     <!-- Global spinner used by AJAX buttons -->
     <style>
         .custom-spinner {

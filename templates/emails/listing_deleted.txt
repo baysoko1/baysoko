@@ -1,0 +1,8 @@
+Hi {{ user.first_name }},
+
+Your listing "{{ listing.title }}" has been deleted.
+
+If this was unexpected, contact support.
+
+Thanks,
+Baysoko

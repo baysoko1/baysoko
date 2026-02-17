@@ -1,0 +1,9 @@
+{% extends 'emails/base_email.html' %}
+
+{% block content %}
+<p>Hi {{ user.first_name }},</p>
+
+<p>Your order #{{ order.id }} is currently under dispute. Our team will review and update you as soon as possible.</p>
+
+<p>Thanks,<br/>Baysoko Support</p>
+{% endblock %}

@@ -1,0 +1,8 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your store "{{ store.name }}" has been deleted.
+
+If this was unexpected, please contact support.
+
+Thanks,
+Baysoko

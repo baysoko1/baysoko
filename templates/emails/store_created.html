@@ -14,7 +14,7 @@
               <td>
                 <p>Good news — your store <strong>{{ store.name }}</strong> has been created and is currently on the <strong>Free</strong> plan.</p>
                 <p>You can view your store and start adding products using the link below:</p>
-                <p style="text-align:center; margin:20px 0;"><a href="{{ store_url }}" style="display:inline-block; padding:12px 20px; background:#2b6cb0; color:#fff; text-decoration:none; border-radius:6px;">View Store</a></p>
+                <p style="text-align:center; margin:20px 0;"><a href="{{ site_url }}{{ store.get_absolute_url }}" style="display:inline-block; padding:12px 20px; background:#2b6cb0; color:#fff; text-decoration:none; border-radius:6px;">View Store</a></p>
                 <hr style="border:none; border-top:1px solid #eee;" />
                 <p style="color:#666; font-size:0.95rem;">If you would like to upgrade to a paid plan later to unlock premium features, visit your dashboard.</p>
                 <p style="color:#999; font-size:0.85rem;">Thanks,<br/>The Baysoko Team</p>

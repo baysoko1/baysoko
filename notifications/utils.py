@@ -34,7 +34,7 @@ def create_notification(recipient, notification_type, title, message,
 # notifications/utils.py
 import requests
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import send_mail, get_connection
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 import logging
@@ -65,20 +65,28 @@ class NotificationService:
 
     @staticmethod
     def send_email(to_email, subject, template_name, context):
-        """Send HTML email notification"""
+        """Send HTML email notification using centralized threaded sender."""
         try:
             html_message = render_to_string(template_name, context)
             plain_message = strip_tags(html_message)
-            
-            send_mail(
-                subject=subject,
-                message=plain_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[to_email],
-                html_message=html_message,
-                fail_silently=False,
-            )
-            return True
+            # Use centralized threaded sender with provider-first approach
+            try:
+                from baysoko.utils.email_helpers import _send_email_threaded
+                _send_email_threaded(subject, plain_message, html_message, [to_email])
+                return True
+            except Exception:
+                # Fallback to Django send_mail with SMTP connection
+                final_conn = get_connection(backend='django.core.mail.backends.smtp.EmailBackend')
+                send_mail(
+                    subject=subject,
+                    message=plain_message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[to_email],
+                    html_message=html_message,
+                    connection=final_conn,
+                    fail_silently=False,
+                )
+                return True
         except Exception as e:
             logger.error(f"Email sending failed: {str(e)}")
             return False
@@ -244,34 +252,20 @@ def notify_new_review(seller, user, review, listing=None, review_type=None):
     
     # You could also send email notification here if configured
     if hasattr(seller, 'email') and seller.email:
-        from django.core.mail import send_mail
-        from django.conf import settings
-        
-        subject = f'New Review Notification - {settings.SITE_NAME}'
-        message = f'''
-        Hello {seller.username},
-        
-        You have received a new review from {user.username}.
-        
-        {message}
-        
-        Rating: {'★' * review.rating}{'☆' * (5 - review.rating)}
-        
-        Review: {review.comment[:100]}...
-        
-        View it here: {settings.SITE_URL}/notifications/
-        
-        Thank you,
-        {settings.SITE_NAME} Team
-        '''
-        
         try:
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [seller.email],
-                fail_silently=True
+            # Prefer centralized NotificationService to ensure provider-first sending
+            email_ctx = {
+                'seller': seller,
+                'user': user,
+                'review': review,
+                'listing': listing,
+                'site_url': settings.SITE_URL,
+            }
+            NotificationService.send_email(
+                seller.email,
+                f'New Review Notification - {settings.SITE_NAME}',
+                'emails/review_notification.html',
+                email_ctx
             )
         except Exception as e:
             logger.error(f"Failed to send review notification email: {e}")

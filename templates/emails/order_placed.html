@@ -1,0 +1,13 @@
+{% extends 'emails/base_email.html' %}
+
+{% block content %}
+<p>Hi {{ user.first_name }},</p>
+
+<p>Thanks — your order #{{ order.id }} has been placed successfully. We'll notify you when payment is confirmed.</p>
+
+<p>Order total: KSh {{ order.total_price }}</p>
+
+<p>View your order: <a href="{{ site_url }}{% url 'order_detail' order.id %}">Order #{{ order.id }}</a></p>
+
+<p>Thanks,<br/>Baysoko</p>
+{% endblock %}

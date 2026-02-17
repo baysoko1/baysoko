@@ -1,0 +1,6 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+We could not process your payment of {{ payment.amount }} for {{ store.name }}. Please update payment details.
+
+Thanks,
+Baysoko Billing

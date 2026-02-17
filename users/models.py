@@ -146,3 +146,13 @@ class User(AbstractUser):
             return self.first_name
         else:
             return self.username
+
+class AccountDeletionLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    username = models.CharField(max_length=150)
+    email = models.EmailField()
+    reason = models.TextField(blank=True)
+    deleted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.username} - {self.deleted_at}"

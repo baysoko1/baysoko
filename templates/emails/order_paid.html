@@ -1,0 +1,11 @@
+<html>
+<body>
+  <p>Hi {{ user.first_name }},</p>
+  <p>Your order #{{ order.id }} has been marked as <strong>Paid</strong>.</p>
+  <p>Order total: {{ order.total_price }}</p>
+  {% if tracking_url %}
+  <p>You can track delivery here: <a href="{{ tracking_url }}">Track order</a></p>
+  {% endif %}
+  <p>Thank you for shopping with Baysoko.</p>
+</body>
+</html>

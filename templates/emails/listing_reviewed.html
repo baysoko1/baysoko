@@ -1,0 +1,15 @@
+{% extends 'emails/base_email.html' %}
+
+{% block content %}
+<p>Hi {{ user.first_name }},</p>
+
+<p>Your listing "{{ listing.title }}" just received a new review:</p>
+<blockquote>
+  <p>Rating: {{ review.rating }} / 5</p>
+  <p>{{ review.comment }}</p>
+</blockquote>
+
+<p>View the listing: <a href="{{ site_url }}{% url 'listing-detail' listing.id %}">View Listing</a></p>
+
+<p>Thanks,<br/>Baysoko</p>
+{% endblock %}

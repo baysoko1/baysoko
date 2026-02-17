@@ -1,0 +1,6 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your store "{{ store.name }}" has been created. You can view it here: {{ site_url }}{% url 'storefront:store_detail' store.slug %}
+
+Thanks,
+Baysoko

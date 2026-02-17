@@ -1,0 +1,8 @@
+Hi {{ user.first_name }},
+
+Your listing "{{ listing.title }}" was updated.
+
+View it here: {{ site_url }}{% url 'listing-detail' listing.id %}
+
+Thanks,
+Baysoko

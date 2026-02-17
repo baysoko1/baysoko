@@ -1,0 +1,10 @@
+Hi {{ user.first_name }},
+
+Your order #{{ order.id }} has been marked as PAID.
+
+Order total: {{ order.total_price }}
+
+{% if tracking_url %}Track order: {{ tracking_url }}
+{% endif %}
+
+Thank you for shopping with Baysoko.

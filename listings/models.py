@@ -11,6 +11,13 @@ from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
+from django.template.loader import render_to_string
+
+# Import the shared email helper lazily-friendly
+try:
+    from baysoko.utils.email_helpers import render_and_send
+except Exception:
+    render_and_send = None
 
 
 User = get_user_model()
@@ -478,6 +485,20 @@ class Order(models.Model):
         self.paid_at = timezone.now()
         self.save()
         
+        # Send order-paid notification to buyer
+        try:
+            if render_and_send:
+                subject = f'Your order #{self.id} is paid'
+                ctx = {
+                    'order': self,
+                    'user': self.user,
+                    'site_url': getattr(settings, 'SITE_URL', ''),
+                    'tracking_url': self.get_delivery_tracking_url(),
+                }
+                render_and_send('emails/order_paid.html', 'emails/order_paid.txt', ctx, subject, [self.email or self.user.email])
+        except Exception:
+            # best-effort; do not raise
+            pass
         # Update stock for each item in the order
         for order_item in self.order_items.all():
             listing = order_item.listing
@@ -544,6 +565,7 @@ class Order(models.Model):
 
     def save(self, *args, **kwargs):
         # Track status changes for webhooks
+        created = not bool(getattr(self, 'pk', None))
         if self.pk:
             try:
                 original = Order.objects.get(pk=self.pk)
@@ -569,6 +591,34 @@ class Order(models.Model):
         
         super().save(*args, **kwargs)
 
+        # After save: send a 'order placed' notification when created
+        try:
+            if created and render_and_send:
+                subject = f'Order #{self.id} placed successfully'
+                ctx = {
+                    'order': self,
+                    'user': self.user,
+                    'site_url': getattr(settings, 'SITE_URL', ''),
+                }
+                render_and_send('emails/order_placed.html', 'emails/order_placed.txt', ctx, subject, [self.email or self.user.email])
+        except Exception:
+            pass
+
+        # If status changed (and we have original), notify for cancellations or disputes
+        try:
+            orig_status = getattr(self, '_original_status', None)
+            if orig_status is not None and self.status != orig_status and render_and_send:
+                if self.status == 'cancelled':
+                    subject = f'Order #{self.id} cancelled'
+                    ctx = {'order': self, 'user': self.user, 'site_url': getattr(settings, 'SITE_URL', '')}
+                    render_and_send('emails/order_cancelled.html', 'emails/order_cancelled.txt', ctx, subject, [self.email or self.user.email])
+                elif self.status == 'disputed':
+                    subject = f'Order #{self.id} under dispute'
+                    ctx = {'order': self, 'user': self.user, 'site_url': getattr(settings, 'SITE_URL', '')}
+                    render_and_send('emails/order_disputed.html', 'emails/order_disputed.txt', ctx, subject, [self.email or self.user.email])
+        except Exception:
+            pass
+
     def set_delivery_status(self, new_status):
         
         if new_status not in ('shipped', 'delivered', 'in_transit', 'out_for_delivery', 'picked_up', 'failed', 'cancelled'):
@@ -592,6 +642,20 @@ class Order(models.Model):
                 delattr(self, '_delivery_status_allowed')
             except Exception:
                 pass
+        # Send notifications for important delivery transitions
+        try:
+            if render_and_send:
+                if new_status == 'shipped':
+                    subject = f'Your order #{self.id} has been shipped'
+                    ctx = {'order': self, 'user': self.user, 'tracking_url': self.get_delivery_tracking_url(), 'site_url': getattr(settings, 'SITE_URL', '')}
+                    render_and_send('emails/order_shipped.html', 'emails/order_shipped.txt', ctx, subject, [self.email or self.user.email])
+                if new_status == 'delivered':
+                    subject = f'Your order #{self.id} is delivered'
+                    ctx = {'order': self, 'user': self.user, 'site_url': getattr(settings, 'SITE_URL', '')}
+                    render_and_send('emails/order_delivered.html', 'emails/order_delivered.txt', ctx, subject, [self.email or self.user.email])
+        except Exception:
+            pass
+
         return True
 
 class WebhookLog(models.Model):
@@ -701,6 +765,23 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"Payment for Order #{self.order.id}"
+
+    def mark_as_refunded(self, reason=None):
+        """Mark payment as refunded and notify buyer via email (best-effort)."""
+        try:
+            self.status = 'refunded'
+            self.save()
+            # Notify buyer
+            try:
+                if render_and_send:
+                    subject = f'Your order #{self.order.id} has been refunded'
+                    ctx = {'order': self.order, 'user': self.order.user, 'site_url': getattr(settings, 'SITE_URL', ''), 'reason': reason}
+                    render_and_send('emails/order_refunded.html', 'emails/order_refunded.txt', ctx, subject, [self.order.email or self.order.user.email])
+            except Exception:
+                pass
+        except Exception:
+            # Best-effort: do not propagate
+            pass
 
     def mark_as_completed(self, transaction_id=None):
         """Mark the payment completed.

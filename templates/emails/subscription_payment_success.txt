@@ -1,0 +1,8 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+We received your payment of KSh {{ payment.amount }} for {{ store.name }}. Thank you!
+
+Subscription active until {{ subscription.current_period_end }}
+
+Thanks,
+Baysoko Billing

@@ -10,6 +10,7 @@ from .models import Store, Subscription, MpesaPayment
 from .mpesa import MpesaGateway
 from .models_trial import UserTrial
 from django.db import models
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -590,6 +591,35 @@ class SubscriptionService:
                 f"Trial #{trial_record.trial_number} started for user {user.id} "
                 f"on store {store.id}. Remaining trials: {eligibility_data['details']['remaining_trials'] - 1}"
             )
+            # Attempt to send trial-start email and create an in-app notification immediately.
+            try:
+                from baysoko.utils.email_helpers import render_and_send
+                from notifications.utils import notify_system_message
+
+                owner_email = getattr(store.owner, 'email', None)
+                recipients = [e for e in [owner_email] if e]
+                email_ctx = {
+                    'subscription': subscription,
+                    'store': store,
+                    'user': store.owner,
+                    'trial_record': trial_record,
+                    'site_url': getattr(settings, 'SITE_URL', ''),
+                }
+                if recipients:
+                    try:
+                        render_and_send('emails/subscription_trial_started.html', 'emails/subscription_trial_started.txt', email_ctx,
+                                        f'Your trial for {store.name} has started', recipients)
+                    except Exception:
+                        logger.exception('Failed to send trial start email via centralized sender')
+
+                # Create in-app notification if owner exists
+                try:
+                    if getattr(store, 'owner', None):
+                        notify_system_message(store.owner, 'Trial Started', f'Your trial for {store.name} has started.')
+                except Exception:
+                    logger.exception('Failed to create in-app notification for trial start')
+            except Exception:
+                logger.exception('Error while attempting immediate trial-start notifications')
             
             return True, {
                 'subscription': subscription,
