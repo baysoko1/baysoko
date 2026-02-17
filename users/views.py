@@ -150,55 +150,58 @@ def send_verification_email(user):
     # Send email on a background thread to avoid blocking the web worker.
     def _send():
         try:
-            # Choose an envelope-from acceptable to the SMTP provider (Brevo).
-            # Priority: explicit env override -> EMAIL_HOST_USER (if email-like) -> DEFAULT_FROM_EMAIL
-            env_override = (
-                os.environ.get('SMTP_ENVELOPE_FROM')
-                or os.environ.get('MAIL_ENVELOPE_FROM')
-                or os.environ.get('MAILTRAP_ENVELOPE_FROM')
+            # Prefer Brevo transactional API when a Brevo API key is available.
+            brevo_key = (
+                os.environ.get('BREVO_API_KEY')
+                or os.environ.get('SENDINBLUE_API_KEY')
+                or os.environ.get('SIB_API_KEY')
             )
 
-            email_host_user = getattr(settings, 'EMAIL_HOST_USER', None)
-            envelope_from = None
-            if env_override:
-                envelope_from = env_override
-            elif email_host_user and '@' in str(email_host_user):
-                envelope_from = email_host_user
-            else:
-                envelope_from = settings.DEFAULT_FROM_EMAIL
+            # If the environment uses Brevo SMTP and no explicit API key, the
+            # SMTP password may actually be the API key; allow that as a fallback.
+            if not brevo_key:
+                email_host_val = getattr(settings, 'EMAIL_HOST', os.environ.get('EMAIL_HOST', '')).lower()
+                if 'brevo' in email_host_val or 'sendinblue' in email_host_val:
+                    brevo_key = os.environ.get('EMAIL_HOST_PASSWORD') or getattr(settings, 'EMAIL_HOST_PASSWORD', None)
 
-            # Use Django's configured email connection (will pick up Brevo settings)
+            if brevo_key:
+                try:
+                    headers = {
+                        'accept': 'application/json',
+                        'api-key': brevo_key,
+                        'content-type': 'application/json',
+                    }
+                    sender = {'name': os.environ.get('EMAIL_FROM_NAME', 'Baysoko'), 'email': settings.DEFAULT_FROM_EMAIL}
+                    to = [{'email': user.email, 'name': (user.get_full_name() or '').strip()}]
+                    payload = {'sender': sender, 'to': to, 'subject': subject, 'textContent': plain_message, 'htmlContent': html_message}
+                    resp = requests.post('https://api.brevo.com/v3/smtp/email', json=payload, headers=headers, timeout=10)
+                    if 200 <= getattr(resp, 'status_code', 0) < 300:
+                        logger.info('Verification email sent via Brevo API for user id=%s; status=%s', getattr(user, 'id', None), resp.status_code)
+                        return
+                    logger.warning('Brevo API send failed status=%s body=%s', getattr(resp, 'status_code', None), getattr(resp, 'text', None))
+                except Exception:
+                    logger.exception('Brevo API send attempt failed; will fallback to SMTP/Django backend')
+
+            # SMTP fallback: use explicit envelope override if provided, otherwise
+            # use DEFAULT_FROM_EMAIL. Do not attempt to use non-email SMTP usernames
+            # (like 'api') as the envelope-from.
+            envelope_from = os.environ.get('SMTP_ENVELOPE_FROM') or os.environ.get('MAIL_ENVELOPE_FROM') or settings.DEFAULT_FROM_EMAIL
+
             try:
                 connection = get_connection()
-                msg = DjangoEmailMessage(
-                    subject=subject,
-                    body=plain_message,
-                    from_email=envelope_from,
-                    to=[user.email],
-                    connection=connection,
-                    headers={'From': settings.DEFAULT_FROM_EMAIL},
-                )
+                msg = DjangoEmailMessage(subject=subject, body=plain_message, from_email=envelope_from, to=[user.email], connection=connection, headers={'From': settings.DEFAULT_FROM_EMAIL})
                 try:
                     msg.attach_alternative(html_message, 'text/html')
                 except Exception:
-                    # If attaching HTML fails, proceed with plain text only
                     pass
-
                 msg.send(fail_silently=False)
-                logger.info('Verification email sent for user id=%s via connection %s using envelope=%s', getattr(user, 'id', None), type(connection).__name__, envelope_from)
+                logger.info('Verification email sent for user id=%s via SMTP connection using envelope=%s', getattr(user, 'id', None), envelope_from)
                 return
             except Exception:
                 logger.exception('Direct send via Django connection failed; falling back to send_mail')
 
-            # Final fallback: Django's send_mail (will also use configured EMAIL_BACKEND)
-            send_mail(
-                subject,
-                plain_message,
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                html_message=html_message,
-                fail_silently=False,
-            )
+            # Final fallback: Django's send_mail
+            send_mail(subject, plain_message, settings.DEFAULT_FROM_EMAIL, [user.email], html_message=html_message, fail_silently=False)
             logger.info('Verification email sent for user id=%s via configured EMAIL_BACKEND', getattr(user, 'id', None))
         except Exception as e:
             logger.exception('Failed to send verification email for user id=%s: %s', getattr(user, 'id', None), e)
