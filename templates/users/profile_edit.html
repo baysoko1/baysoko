@@ -521,17 +521,7 @@
 
     <!-- Modern Profile Card -->
     <div class="profile-edit-card-modern">
-        <!-- Success Messages -->
-        {% if messages %}
-            {% for message in messages %}
-                {% if message.tags == 'success' %}
-                <div class="success-message-modern animate-slide-up">
-                    <i class="bi bi-check-circle-fill fs-4"></i>
-                    <span class="fw-medium">{{ message }}</span>
-                </div>
-                {% endif %}
-            {% endfor %}
-        {% endif %}
+        <!-- Success messages are handled globally in base.html; no inline toasts here -->
 
         <!-- Main Form -->
         <form method="post" enctype="multipart/form-data" class="form-section-modern" id="profileForm">

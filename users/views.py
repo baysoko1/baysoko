@@ -12,7 +12,7 @@ import contextlib
 import smtplib
 import traceback
 from datetime import timedelta
-from email.message import EmailMessage
+# avoid importing stdlib EmailMessage to prevent name collisions with Django's
 from urllib.parse import urlencode
 
 from django.shortcuts import render, redirect, get_object_or_404
@@ -30,7 +30,7 @@ from django.views.generic import DetailView, UpdateView
 from django.urls import reverse_lazy, reverse
 from django.http import JsonResponse, HttpResponse
 from django.core.paginator import Paginator
-from django.core.mail import send_mail, get_connection, EmailMessage as DjangoEmailMessage
+from django.core.mail import send_mail, get_connection, EmailMessage as DjangoEmailMessage, EmailMultiAlternatives
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, IntegrityError
 from django.conf import settings
@@ -101,15 +101,20 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
             if 200 <= resp.status_code < 300:
                 logger.info('Email sent via Brevo API to %s', to_emails)
                 return
-            logger.warning('Brevo API failed: %s %s', resp.status_code, resp.text)
+            logger.warning('Brevo API returned non-2xx: %s %s', resp.status_code, resp.text)
+        except requests.exceptions.SSLError as e:
+            logger.warning('Brevo API SSL error, falling back to SMTP: %s', e)
+        except requests.exceptions.RequestException as e:
+            logger.warning('Brevo API request failed, falling back to SMTP: %s', e)
         except Exception:
-            logger.exception('Brevo API exception, falling back to SMTP')
+            logger.exception('Unexpected exception when calling Brevo API; falling back to SMTP')
 
     # Fallback to SMTP
     envelope_from = os.environ.get('SMTP_ENVELOPE_FROM') or settings.DEFAULT_FROM_EMAIL
     try:
         connection = get_connection()
-        msg = DjangoEmailMessage(
+        # Use EmailMultiAlternatives which supports HTML alternatives reliably
+        msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
             from_email=envelope_from,
@@ -117,7 +122,8 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
             connection=connection,
             headers={'From': settings.DEFAULT_FROM_EMAIL}
         )
-        msg.attach_alternative(html_message, 'text/html')
+        if html_message:
+            msg.attach_alternative(html_message, 'text/html')
         msg.send(fail_silently=False)
         logger.info('Email sent via SMTP to %s', to_emails)
     except Exception:
@@ -147,20 +153,38 @@ def _send_email_threaded(subject, plain_message, html_message, to_emails):
 
 def send_verification_email(user):
     subject = 'Verify your email for Baysoko'
+    # Build an absolute or relative verification link so email buttons can
+    # include a one-click verify action that pre-fills the code and triggers
+    # automatic verification when clicked.
+    site_url = os.environ.get('SITE_URL') or getattr(settings, 'SITE_URL', None) or os.environ.get('SITE_DOMAIN') or ''
+    if site_url and not site_url.startswith('http'):
+        site_url = f'https://{site_url}'
+    # normalize to avoid double slashes when concatenating with paths
+    site_url = site_url.rstrip('/')
+    verify_path = reverse('verify_email') + f'?user_id={user.id}&code={user.email_verification_code}'
     html_message = render_to_string('users/verification_email.html', {
         'user': user,
         'code': user.email_verification_code,
         'site_name': 'Baysoko',
+        'site_url': site_url,
+        'verify_path': verify_path,
     })
     plain_message = f'Your verification code is: {user.email_verification_code}'
     _send_email_threaded(subject, plain_message, html_message, [user.email])
 
 def send_welcome_email(user):
     subject = 'Welcome to Baysoko'
+    # include a verify link so the welcome email button can perform a one-click verify
+    site_url = os.environ.get('SITE_URL') or getattr(settings, 'SITE_URL', None) or os.environ.get('SITE_DOMAIN') or ''
+    if site_url and not site_url.startswith('http'):
+        site_url = f'https://{site_url}'
+    site_url = site_url.rstrip('/')
+    verify_path = reverse('verify_email') + f'?user_id={user.id}&code={user.email_verification_code}'
     html_message = render_to_string('users/welcome_email.html', {
         'user': user,
         'site_name': 'Baysoko',
-        'site_url': getattr(settings, 'SITE_URL', '/'),
+        'site_url': site_url,
+        'verify_path': verify_path,
     })
     plain_message = render_to_string('users/welcome_email.txt', {
         'user': user,
@@ -283,61 +307,81 @@ def register(request):
 
 @csrf_exempt
 def verify_email(request):
-    if request.method == 'POST':
+    # Support one-click verification via GET (clicked from email button)
+    # and AJAX/POST verification from the verification modal.
+    redirect_after = False
+    if request.method == 'GET' and (request.GET.get('user_id') or request.GET.get('code')):
+        user_id = request.GET.get('user_id')
+        code = request.GET.get('code')
+        redirect_after = True
+    elif request.method == 'POST':
         user_id = request.POST.get('user_id')
         code = request.POST.get('code')
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return JsonResponse({'success': False, 'error': 'User not found.'})
-        now = timezone.now()
-        today = now.date()
+    else:
+        return JsonResponse({'success': False, 'error': 'Invalid request.'})
 
-        # Reset daily counters if needed
-        if user.last_verification_attempt_date != today:
-            user.verification_attempts_today = 0
-            user.last_verification_attempt_date = today
-            user.save()
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        if redirect_after:
+            context = {'message': 'User not found.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+            return render(request, 'users/verify_result.html', context)
+        return JsonResponse({'success': False, 'error': 'User not found.'})
 
-        if user.verification_attempts_today >= 3:
-            return JsonResponse({
-                'success': False,
-                'error': 'Maximum verification attempts reached. Try again tomorrow.',
-                'attempts_left': 0
-            })
+    now = timezone.now()
+    today = now.date()
 
-        # Validate code and expiry (10 minutes)
-        if (user.email_verification_code and user.email_verification_code == code and
-                user.email_verification_sent_at and
-                now - user.email_verification_sent_at <= timedelta(minutes=10)):
-            # Successful verification
-            user.email_verified = True
-            user.is_active = True
-            user.email_verification_code = None
-            user.verification_attempts_today = 0
-            user.save()
-            if not request.user.is_authenticated:
-                login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-            redirect_url = reverse('profile-edit', kwargs={'pk': user.pk}) if not user.phone_number else reverse('home')
-            return JsonResponse({'success': True, 'redirect': redirect_url})
-
-        # Invalid code
-        user.verification_attempts_today += 1
+    # Reset daily counters if needed
+    if user.last_verification_attempt_date != today:
+        user.verification_attempts_today = 0
         user.last_verification_attempt_date = today
         user.save()
-        attempts_left = max(0, 3 - user.verification_attempts_today)
-        if attempts_left <= 0:
-            return JsonResponse({
-                'success': False,
-                'error': 'Maximum verification attempts reached. Try again tomorrow.',
-                'attempts_left': 0
-            })
-        return JsonResponse({
-            'success': False,
-            'error': f'Invalid code. {attempts_left} attempts remaining.',
-            'attempts_left': attempts_left
-        })
-    return JsonResponse({'success': False, 'error': 'Invalid request.'})
+
+    if user.verification_attempts_today >= 3:
+        if redirect_after:
+            context = {'message': 'Maximum verification attempts reached. Try again tomorrow.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+            return render(request, 'users/verify_result.html', context)
+        return JsonResponse({'success': False, 'error': 'Maximum verification attempts reached. Try again tomorrow.', 'attempts_left': 0})
+
+    # Validate code and expiry (10 minutes)
+    if user.email_verification_code and user.email_verification_code == code and user.email_verification_sent_at:
+        if now - user.email_verification_sent_at > timedelta(minutes=10):
+            if redirect_after:
+                context = {'message': 'Verification code expired. Request a new one.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+                return render(request, 'users/verify_result.html', context)
+            return JsonResponse({'success': False, 'error': 'Code expired. Request a new one.', 'attempts_left': max(0, 3 - user.verification_attempts_today)})
+
+        # Successful verification
+        user.email_verified = True
+        user.is_active = True
+        user.email_verification_code = None
+        user.verification_attempts_today = 0
+        user.save()
+        if not request.user.is_authenticated:
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        # If user has no phone number, send them to profile-edit to add one
+        redirect_url = reverse('profile-edit', kwargs={'pk': user.pk}) if not user.phone_number else reverse('home')
+        if redirect_after:
+            messages.success(request, 'Email verified! Redirecting...')
+            return redirect(redirect_url)
+        return JsonResponse({'success': True, 'redirect': redirect_url})
+
+    # Invalid code -> increment attempts
+    user.verification_attempts_today += 1
+    user.last_verification_attempt_date = today
+    user.save()
+    attempts_left = max(0, 3 - user.verification_attempts_today)
+    if attempts_left <= 0:
+        if redirect_after:
+            context = {'message': 'Maximum verification attempts reached. Try again tomorrow.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+            return render(request, 'users/verify_result.html', context)
+        return JsonResponse({'success': False, 'error': 'Maximum verification attempts reached. Try again tomorrow.', 'attempts_left': 0})
+
+    if redirect_after:
+        context = {'message': f'Invalid code. {attempts_left} attempts remaining.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+        return render(request, 'users/verify_result.html', context)
+
+    return JsonResponse({'success': False, 'error': f'Invalid code. {attempts_left} attempts remaining.', 'attempts_left': attempts_left})
 
 @csrf_exempt
 def resend_code(request):

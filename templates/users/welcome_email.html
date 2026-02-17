@@ -31,7 +31,7 @@
         <p>Your account was created successfully. To complete setup we sent a verification code to <strong>{{ user.email }}</strong>. Use it to verify your email and unlock full features.</p>
 
         <p>
-          <a class="cta" href="{{ site_url }}{% url 'verification_required' %}">Verify your account</a>
+          <a class="cta" href="{{ site_url }}{{ verify_path }}">Verify your account</a>
         </p>
 
         <p class="meta">Tips: add a clear profile picture and a short bio — listings with photos sell faster.</p>
