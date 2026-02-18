@@ -210,10 +210,11 @@ def register(request):
 # ----------------------------------------------------------------------
 #  Email verification
 # ----------------------------------------------------------------------
+from .utils import verify_email_logic   # import the helper
 
 @csrf_exempt
 def verify_email(request):
-    # Support one-click verification via GET (clicked from email button)
+    # Support one-click verification via GET (from email button)
     # and AJAX/POST verification from the verification modal.
     redirect_after = False
     if request.method == 'GET' and (request.GET.get('user_id') or request.GET.get('code')):
@@ -226,68 +227,56 @@ def verify_email(request):
     else:
         return JsonResponse({'success': False, 'error': 'Invalid request.'})
 
+    if not user_id or not code:
+        if redirect_after:
+            context = {
+                'message': 'Missing verification parameters.',
+                'redirect_to': reverse('verification_required'),
+                'countdown': 6
+            }
+            return render(request, 'users/verify_result.html', context)
+        return JsonResponse({'success': False, 'error': 'Missing user_id or code.'})
+
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
         if redirect_after:
-            context = {'message': 'User not found.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+            context = {
+                'message': 'User not found.',
+                'redirect_to': reverse('verification_required'),
+                'countdown': 6
+            }
             return render(request, 'users/verify_result.html', context)
         return JsonResponse({'success': False, 'error': 'User not found.'})
 
-    now = timezone.now()
-    today = now.date()
+    # Call the helper function
+    success, error_msg, attempts_left, redirect_url = verify_email_logic(user, code)
 
-    # Reset daily counters if needed
-    if user.last_verification_attempt_date != today:
-        user.verification_attempts_today = 0
-        user.last_verification_attempt_date = today
-        user.save()
-
-    if user.verification_attempts_today >= 3:
-        if redirect_after:
-            context = {'message': 'Maximum verification attempts reached. Try again tomorrow.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
-            return render(request, 'users/verify_result.html', context)
-        return JsonResponse({'success': False, 'error': 'Maximum verification attempts reached. Try again tomorrow.', 'attempts_left': 0})
-
-    # Validate code and expiry (10 minutes)
-    if user.email_verification_code and user.email_verification_code == code and user.email_verification_sent_at:
-        if now - user.email_verification_sent_at > timedelta(minutes=10):
-            if redirect_after:
-                context = {'message': 'Verification code expired. Request a new one.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
-                return render(request, 'users/verify_result.html', context)
-            return JsonResponse({'success': False, 'error': 'Code expired. Request a new one.', 'attempts_left': max(0, 3 - user.verification_attempts_today)})
-
-        # Successful verification
-        user.email_verified = True
-        user.is_active = True
-        user.email_verification_code = None
-        user.verification_attempts_today = 0
-        user.save()
+    if success:
+        # Log the user in if not already authenticated (for POST/JSON case)
         if not request.user.is_authenticated:
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-        # If user has no phone number, send them to profile-edit to add one
-        redirect_url = reverse('profile-edit', kwargs={'pk': user.pk}) if not user.phone_number else reverse('home')
+
         if redirect_after:
             messages.success(request, 'Email verified! Redirecting...')
             return redirect(redirect_url)
+
         return JsonResponse({'success': True, 'redirect': redirect_url})
-
-    # Invalid code -> increment attempts
-    user.verification_attempts_today += 1
-    user.last_verification_attempt_date = today
-    user.save()
-    attempts_left = max(0, 3 - user.verification_attempts_today)
-    if attempts_left <= 0:
+    else:
+        # Verification failed
         if redirect_after:
-            context = {'message': 'Maximum verification attempts reached. Try again tomorrow.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
+            context = {
+                'message': error_msg,
+                'redirect_to': reverse('verification_required'),
+                'countdown': 6
+            }
             return render(request, 'users/verify_result.html', context)
-        return JsonResponse({'success': False, 'error': 'Maximum verification attempts reached. Try again tomorrow.', 'attempts_left': 0})
 
-    if redirect_after:
-        context = {'message': f'Invalid code. {attempts_left} attempts remaining.', 'redirect_to': reverse('verification_required'), 'countdown': 6}
-        return render(request, 'users/verify_result.html', context)
-
-    return JsonResponse({'success': False, 'error': f'Invalid code. {attempts_left} attempts remaining.', 'attempts_left': attempts_left})
+        return JsonResponse({
+            'success': False,
+            'error': error_msg,
+            'attempts_left': attempts_left
+        })
 
 @csrf_exempt
 def resend_code(request):
@@ -1245,3 +1234,5 @@ def delete_account_ajax(request):
         'success': True,
         'redirect': '/'  # or any other public URL
     })
+
+

@@ -35,11 +35,13 @@ class MpesaGateway:
             if not self.callback_url.startswith('https://'):
                 logger.warning(f"MPESA_CALLBACK_URL must be HTTPS, got: {self.callback_url}. M-Pesa may reject this URL.")
         
-        # Check if we have valid credentials
+        # Credentials validation: require consumer key/secret and callback URL.
+        # Passkey is required for production; for sandbox we will accept a
+        # configured passkey or fall back to the known sandbox passkey when
+        # generating the STK password (see `generate_password`).
         self.has_valid_credentials = all([
             self.consumer_key,
-            self.consumer_secret, 
-            self.passkey,
+            self.consumer_secret,
             self.callback_url
         ])
         
@@ -89,9 +91,12 @@ class MpesaGateway:
                 # Debug: log request metadata (non-sensitive)
                 logger.debug(f"[MPESA DEBUG] Token request prepared: url={self.oauth_url}, method=GET, auth_header_present={'Authorization' in headers}, consumer_key_set={bool(self.consumer_key)}, consumer_secret_set={bool(self.consumer_secret)}")
                 
+                # Safaricom expects the grant_type query parameter to be present.
+                # Use params to ensure proper encoding and avoid 400 Invalid grant type.
                 response = requests.get(
                     self.oauth_url,
                     headers=headers,
+                    params={'grant_type': 'client_credentials'},
                     timeout=30,
                     verify=True
                 )
@@ -136,7 +141,23 @@ class MpesaGateway:
     
     def generate_password(self, timestamp):
         """Generate Lipa Na M-Pesa Online Password"""
-        data_to_encode = f"{self.business_shortcode}{self.passkey}{timestamp}"
+        # The password is base64(BusinessShortCode + Passkey + Timestamp).
+        # Use the configured passkey if present. In sandbox, if no passkey is
+        # configured, fall back to the standard sandbox passkey which is
+        # required by the Safaricom Daraja sandbox.
+        SANDBOX_DEFAULT_PASSKEY = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0d5c'
+
+        if self.passkey:
+            passkey_to_use = self.passkey
+        elif self.environment == 'sandbox':
+            passkey_to_use = SANDBOX_DEFAULT_PASSKEY
+            logger.info('No MPESA_PASSKEY configured; using sandbox default passkey for password generation')
+        else:
+            # Production requires an explicit passkey to be set
+            logger.error('MPESA_PASSKEY missing for production environment')
+            passkey_to_use = ''
+
+        data_to_encode = f"{self.business_shortcode}{passkey_to_use}{timestamp}"
         encoded_string = base64.b64encode(data_to_encode.encode()).decode()
         return encoded_string
     

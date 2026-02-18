@@ -728,6 +728,17 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
             action=f"Created listing: {form.instance.title}"
         )
 
+        # In-app notification for listing creation
+        try:
+            from notifications.utils import notify_system_message
+            try:
+                action_url = form.instance.get_absolute_url()
+            except Exception:
+                action_url = ''
+            notify_system_message(self.request.user, 'Listing Created', f'Your listing "{form.instance.title}" was created.', action_url=action_url)
+        except Exception:
+            logger.exception('Failed to create in-app notification for listing creation')
+
         messages.success(self.request, "Listing created successfully!")
         return response
 
@@ -859,6 +870,16 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             user=self.request.user,
             action=f"Updated listing: {form.instance.title}"
         )
+        # In-app notification for listing update
+        try:
+            from notifications.utils import notify_system_message
+            try:
+                action_url = form.instance.get_absolute_url()
+            except Exception:
+                action_url = ''
+            notify_system_message(self.request.user, 'Listing Updated', f'Your listing "{form.instance.title}" was updated.', action_url=action_url)
+        except Exception:
+            logger.exception('Failed to create in-app notification for listing update')
         
         messages.success(self.request, "Listing updated successfully!")
         return response
@@ -873,6 +894,23 @@ class ListingDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     def test_func(self):
         listing = self.get_object()
         return self.request.user == listing.seller
+    
+    def delete(self, request, *args, **kwargs):
+        listing = self.get_object()
+        owner = listing.seller
+        title = listing.title
+        response = super().delete(request, *args, **kwargs)
+        # Activity log and in-app notification for deletion
+        try:
+            Activity.objects.create(
+                user=owner,
+                action=f"Deleted listing: {title}"
+            )
+            from notifications.utils import notify_system_message
+            notify_system_message(owner, 'Listing Deleted', f'Your listing "{title}" was deleted.', action_url='')
+        except Exception:
+            logger.exception('Failed to create in-app notification for listing deletion')
+        return response
 
 
 def all_listings(request):

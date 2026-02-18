@@ -1971,11 +1971,11 @@ window.handleFavoriteClick = function(button, listingId) {
                     </div>
                     {% endif %}
                     
-                    <!-- Category Badge -->
-                    <div class="listing-category-badge">
-                        <i class="bi {{ listing.category.icon|default:'bi-tag' }}"></i>
+                    <!-- Category Badge (styled like home) -->
+                    <span class="listing-category">
+                        <i class="bi bi-{{ listing.category.icon|default:'grid' }}"></i>
                         {{ listing.category.name }}
-                    </div>
+                    </span>
                     
                     <!-- Image -->
                     <div class="listing-image">

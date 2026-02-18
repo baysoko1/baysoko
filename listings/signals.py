@@ -1,3 +1,53 @@
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.urls import reverse
+import logging
+
+from .models import Listing
+
+logger = logging.getLogger(__name__)
+
+
+@receiver(post_save, sender=Listing)
+def listing_post_save(sender, instance, created, **kwargs):
+    """Create in-app notification when a listing is created or updated."""
+    try:
+        # Import here to avoid circular imports
+        from notifications.utils import create_notification
+
+        recipient = getattr(instance, 'seller', None) or getattr(instance, 'owner', None)
+        if not recipient:
+            # Nothing to notify
+            return
+
+        listing_url = ''
+        try:
+            listing_url = reverse('listing-detail', args=[instance.pk])
+        except Exception:
+            listing_url = f'/listing/{instance.pk}/'
+
+        if created:
+            title = 'Listing Created'
+            message = f'Your listing "{instance.title}" was created successfully.'
+            notification_type = 'listing_created'
+        else:
+            title = 'Listing Updated'
+            message = f'Your listing "{instance.title}" was updated successfully.'
+            notification_type = 'listing_updated'
+
+        create_notification(
+            recipient=recipient,
+            notification_type=notification_type,
+            title=title,
+            message=message,
+            related_object_id=instance.pk,
+            related_content_type='listing',
+            action_url=listing_url,
+            action_text='View Listing'
+        )
+        logger.info(f"Created notification for listing {instance.pk} (created={created})")
+    except Exception as e:
+        logger.exception('Failed to create listing notification: %s', e)
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.conf import settings

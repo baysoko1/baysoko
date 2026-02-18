@@ -180,3 +180,26 @@ def send_trial_expiration_reminder(subscription_id):
         
     except Exception as e:
         logger.error(f"Error sending trial expiration reminder: {str(e)}")
+
+
+    @shared_task
+    def check_active_subscription_expirations():
+        """Find active subscriptions whose period ended and mark them canceled so
+        the existing subscription post_save signal sends emails and in-app notifications.
+        This should be scheduled to run once daily via Celery beat.
+        """
+        from .models import Subscription
+        from django.utils import timezone
+
+        now = timezone.now()
+        expired = Subscription.objects.filter(status='active', current_period_end__lt=now)
+        count = 0
+        for sub in expired:
+            try:
+                sub.status = 'canceled'
+                sub.save()
+                logger.info('Marked subscription %s for store %s as canceled (period ended)', sub.id, getattr(sub.store, 'name', 'unknown'))
+                count += 1
+            except Exception:
+                logger.exception('Failed to mark expired subscription %s', sub.id)
+        return {'expired_marked': count}

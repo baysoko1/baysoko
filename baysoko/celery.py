@@ -51,4 +51,20 @@ app.conf.update(
     enable_utc=True,
 )
 
+# Periodic tasks (Celery Beat)
+try:
+    from celery.schedules import crontab
+    # Run subscription expiration check daily at 03:00 UTC
+    app.conf.beat_schedule = getattr(app.conf, 'beat_schedule', {})
+    app.conf.beat_schedule.update({
+        'check-active-subscription-expirations-daily': {
+            'task': 'storefront.tasks.check_active_subscription_expirations',
+            'schedule': crontab(minute=0, hour=3),
+            'options': {'queue': 'periodic'},
+        }
+    })
+except Exception:
+    # If celery.schedules isn't available at import time, skip schedule setup
+    pass
+
 __all__ = ('app',)

@@ -35,7 +35,7 @@
         overflow: hidden;
     }
 
-    /* ===== RAINING ICONS BACKGROUND (replaces galaxy) ===== */
+    /* ===== RAINING ICONS BACKGROUND ===== */
     .rain-container {
         position: fixed;
         top: 0;
@@ -356,7 +356,7 @@
         font-weight: 600;
     }
 
-    /* ===== RIGHT COLUMN: VERTICAL CAROUSEL (transparent background) ===== */
+    /* ===== RIGHT COLUMN: VERTICAL CAROUSEL ===== */
     .creative-section {
         flex: 1;
         position: relative;
@@ -371,7 +371,6 @@
         height: 100vh;
     }
 
-    /* Baysoko Marketplace heading */
     .marketplace-heading {
         text-align: center;
         margin-bottom: 0.5rem;
@@ -395,7 +394,6 @@
         text-shadow: 0 1px 4px rgba(0,0,0,0.3);
     }
 
-    /* Vertical Carousel */
     .carousel-vertical {
         position: relative;
         z-index: 2;
@@ -473,12 +471,10 @@
         object-fit: cover;
     }
 
-    /* Indicators hidden */
     .carousel-indicators {
         display: none !important;
     }
 
-    /* Footers */
     .animated-footer-desktop {
         position: absolute;
         bottom: 15px;
@@ -578,7 +574,7 @@
 
 {% block content %}
 <div class="register-container">
-    <!-- RAINING ICONS BACKGROUND (replaces galaxy) -->
+    <!-- RAINING ICONS BACKGROUND -->
     <div class="rain-container" id="rainContainer"></div>
 
     <!-- LEFT: Registration Form -->
@@ -599,7 +595,7 @@
             <div class="divider"><span>Or register with email</span></div>
         </div>
 
-        <!-- Registration Form (AJAX) -->
+        <!-- Registration Form (WebSocket) -->
         <form method="post" id="registerForm" novalidate data-no-ajax>
             {% csrf_token %}
 
@@ -755,7 +751,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // ========== RAINING ICONS (ENHANCED) ==========
+    // ========== RAINING ICONS ==========
     const rainContainer = document.getElementById('rainContainer');
     const icons = [
         'bi-house', 'bi-house-door', 'bi-fridge', 'bi-tv', 'bi-phone',
@@ -775,10 +771,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const icon = document.createElement('i');
         const randomIcon = icons[Math.floor(Math.random() * icons.length)];
         icon.className = `bi ${randomIcon} rain-icon`;
-        const size = Math.random() * 2.5 + 1.5; // 1.5rem to 4rem
+        const size = Math.random() * 2.5 + 1.5;
         icon.style.fontSize = size + 'rem';
         icon.style.left = Math.random() * 100 + '%';
-        icon.style.animationDuration = (Math.random() * 7 + 8) + 's'; // 8-15s
+        icon.style.animationDuration = (Math.random() * 7 + 8) + 's';
         icon.style.animationDelay = Math.random() * 10 + 's';
         icon.style.opacity = '0';
         const r = Math.floor(Math.random() * 200 + 55);
@@ -880,211 +876,97 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ========== AJAX REGISTRATION ==========
-    const registerForm = document.getElementById('registerForm');
-    const modal = document.getElementById('verificationModal');
-    const userEmailSpan = document.getElementById('userEmail');
-    const verificationCode = document.getElementById('verificationCode');
-    const resendBtn = document.getElementById('resendBtn');
-    const timerDisplay = document.getElementById('timerDisplay');
-    let userId = null;
-    let timerInterval = null;
+    // ========== WebSocket Manager ==========
+    const wsManager = (function() {
+        let socket = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        const reconnectBaseDelay = 1000;
+        const messageQueue = [];
+        let isConnected = false;
+        let messageHandlers = {};
 
-    registerForm.addEventListener('submit', function(e) {
-        if (registerForm.dataset.ajaxSubmitting === '1') {
-            e.preventDefault();
-            return;
+        function getWebSocketUrl() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            return `${protocol}//${host}/ws/auth/`;
         }
-        registerForm.dataset.ajaxSubmitting = '1';
-        e.preventDefault();
-        const formData = new FormData(registerForm);
-        const submitBtn = document.getElementById('submitButton');
-        const originalText = submitBtn.innerHTML;
-        submitBtn.innerHTML = '<span class="custom-spinner" role="status" aria-hidden="true" style="width:1rem;height:1rem;"></span> Creating Account...';
-        submitBtn.disabled = true;
-        document.querySelectorAll('.error-message').forEach(el => el.remove());
 
-        fetch("{% url 'register' %}", {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRFToken': getCookie('csrftoken') || ''
-            },
-            body: formData
-        })
-        .then(response => {
-            submitBtn.innerHTML = originalText;
-            submitBtn.disabled = false;
-            if (response.redirected) {
-                window.location.href = response.url;
-                return null;
-            }
-            const ct = response.headers.get('content-type') || '';
-            if (ct.includes('application/json')) return response.json();
-            return response.text().then(() => { window.location.reload(); return null; });
-        })
-        .then(data => {
-            if (!data) return;
-            console.log('Registration response:', data);
-            if (data.success) {
-                window.location.href = "{% url 'verification_required' %}";
+        function connect() {
+            if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
                 return;
-            } else {
-                if (data.errors) {
-                    if (data.errors.__all__) {
-                        const allErr = data.errors.__all__;
-                        if (typeof allErr === 'string') {
-                            showGlobalMessage(allErr, 'danger');
-                        } else if (Array.isArray(allErr)) {
-                            const msgs = allErr.map(e => (e && e.message) ? e.message : (typeof e === 'string' ? e : JSON.stringify(e)));
-                            showGlobalMessage(msgs.join(' '), 'danger');
-                        }
-                    }
-                    for (let field in data.errors) {
-                        if (field === '__all__') continue;
-                        const input = document.querySelector(`[name="${field}"]`);
-                        const fieldErr = data.errors[field];
-                        let message = '';
-                        if (typeof fieldErr === 'string') message = fieldErr;
-                        else if (Array.isArray(fieldErr)) {
-                            if (fieldErr.length && fieldErr[0].message) message = fieldErr[0].message;
-                            else message = fieldErr.map(e => (e && e.message) ? e.message : (typeof e === 'string' ? e : JSON.stringify(e))).join(' ');
-                        } else message = JSON.stringify(fieldErr);
+            }
+            const wsUrl = getWebSocketUrl();
+            socket = new WebSocket(wsUrl);
 
-                        if (input) {
-                            input.classList.add('error');
-                            const errorDiv = document.createElement('div');
-                            errorDiv.className = 'error-message';
-                            errorDiv.style.color = 'var(--danger)';
-                            errorDiv.style.fontSize = '0.75rem';
-                            errorDiv.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${message}`;
-                            input.parentNode.insertAdjacentElement('afterend', errorDiv);
-                        } else {
-                            showGlobalMessage(message, 'danger');
-                        }
+            socket.onopen = function() {
+                console.log('WebSocket connected');
+                isConnected = true;
+                reconnectAttempts = 0;
+                while (messageQueue.length > 0) {
+                    const msg = messageQueue.shift();
+                    socket.send(JSON.stringify(msg));
+                }
+            };
+
+            socket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket message received:', data);
+                    const type = data.type;
+                    if (type && messageHandlers[type]) {
+                        messageHandlers[type](data);
+                    } else {
+                        console.warn('No handler for message type:', type);
                     }
+                } catch (e) {
+                    console.error('Failed to parse WebSocket message', e);
+                }
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error', error);
+            };
+
+            socket.onclose = function(event) {
+                console.log('WebSocket closed', event);
+                isConnected = false;
+                socket = null;
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const delay = reconnectBaseDelay * Math.pow(2, reconnectAttempts);
+                    reconnectAttempts++;
+                    setTimeout(connect, delay);
                 } else {
-                    showGlobalMessage(data.message || 'Registration failed.', 'danger');
+                    showGlobalMessage('Connection lost. Please refresh the page.', 'danger');
+                }
+            };
+        }
+
+        function sendMessage(type, payload) {
+            const msg = { type, ...payload };
+            if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(msg));
+            } else {
+                messageQueue.push(msg);
+                if (!socket || socket.readyState === WebSocket.CLOSED) {
+                    connect();
                 }
             }
-        })
-        .catch(error => {
-            console.error('Registration AJAX error:', error);
-            submitBtn.innerHTML = originalText;
-            submitBtn.disabled = false;
-            showGlobalMessage('Network error. Please try again.', 'danger');
-        }).finally(() => {
-            try { delete registerForm.dataset.ajaxSubmitting; } catch(e) {}
-        });
-    });
+        }
 
-    let failedAttempts = 0;
-    const MAX_ATTEMPTS = 3;
-    verificationCode.addEventListener('input', function() {
-        if (failedAttempts >= MAX_ATTEMPTS) return;
-        if (this.value.length === 7) verifyCode(this.value);
-    });
+        function onMessageType(type, callback) {
+            messageHandlers[type] = callback;
+        }
 
-    function getCookie(name) {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(';').shift();
-    }
+        connect();
 
-    function verifyCode(code) {
-        const formData = new FormData();
-        formData.append('user_id', userId);
-        formData.append('code', code);
-        fetch("{% url 'verify_email' %}", {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'X-CSRFToken': getCookie('csrftoken') || '', 'X-Requested-With': 'XMLHttpRequest' },
-            body: formData
-        })
-        .then(r => {
-            const ct = r.headers.get('content-type') || '';
-            if (ct.includes('application/json')) return r.json();
-            return r.text().then(txt => ({ success: false, error: 'Unexpected server response', _raw: txt }));
-        })
-        .then(data => {
-            if (data.success) {
-                showGlobalMessage('Email verified! Redirecting...', 'success');
-                setTimeout(() => window.location.href = data.redirect || '/', 2000);
-            } else {
-                document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">${data.error}</span>`;
-                failedAttempts = (data.attempts_left !== undefined) ? (MAX_ATTEMPTS - data.attempts_left) : (failedAttempts + 1);
-                if (failedAttempts >= MAX_ATTEMPTS) {
-                    document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">Maximum verification attempts reached. Try again tomorrow.</span>`;
-                    verificationCode.disabled = true;
-                    resendBtn.disabled = true;
-                } else {
-                    verificationCode.value = '';
-                    verificationCode.focus();
-                }
-            }
-        }).catch(err => {
-            console.error('verify fetch error', err);
-            document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">Network error. Try again.</span>`;
-        });
-    }
+        return {
+            send: sendMessage,
+            on: onMessageType
+        };
+    })();
 
-    resendBtn.addEventListener('click', function() {
-        if (!userId) return;
-        const origHTML = resendBtn.innerHTML;
-        resendBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sending...';
-        resendBtn.disabled = true;
-
-        const formData = new FormData();
-        formData.append('user_id', userId);
-        fetch("{% url 'resend_code' %}", {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'X-CSRFToken': getCookie('csrftoken') || '', 'X-Requested-With': 'XMLHttpRequest' },
-            body: formData
-        })
-        .then(r => {
-            const ct = r.headers.get('content-type') || '';
-            if (ct.includes('application/json')) return r.json();
-            return r.text().then(txt => ({ success: false, error: 'Unexpected server response', _raw: txt }));
-        })
-        .then(data => {
-            resendBtn.innerHTML = origHTML;
-            if (data.success) {
-                document.getElementById('verificationMessage').innerHTML = '<span class="text-success">Code resent.</span>';
-                startResendTimer(60);
-            } else if (data.wait) {
-                startResendTimer(data.wait);
-                document.getElementById('verificationMessage').innerHTML = `<span class="text-warning">Please wait ${data.wait}s.</span>`;
-            } else {
-                resendBtn.disabled = false;
-                document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">${data.error}</span>`;
-            }
-        })
-        .catch(err => {
-            resendBtn.innerHTML = origHTML;
-            resendBtn.disabled = false;
-            document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">Network error. Try again.</span>`;
-        });
-    });
-
-    function startResendTimer(seconds) {
-        resendBtn.disabled = true;
-        let remaining = seconds;
-        timerDisplay.textContent = `Resend in ${remaining}s`;
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
-            remaining--;
-            if (remaining <= 0) {
-                clearInterval(timerInterval);
-                resendBtn.disabled = false;
-                timerDisplay.textContent = '';
-            } else {
-                timerDisplay.textContent = `Resend in ${remaining}s`;
-            }
-        }, 1000);
-    }
-
+    // ========== Global message display ==========
     function showGlobalMessage(message, type) {
         const container = document.getElementById('globalMessageContainer');
         if (!container) return;
@@ -1098,6 +980,167 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 4000);
     }
 
+    // ========== REGISTRATION via WebSocket ==========
+    const registerForm = document.getElementById('registerForm');
+    const submitBtn = document.getElementById('submitButton');
+
+    registerForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<span class="custom-spinner" role="status" aria-hidden="true" style="width:1rem;height:1rem;"></span> Creating Account...';
+        submitBtn.disabled = true;
+        document.querySelectorAll('.error-message').forEach(el => el.remove());
+
+        const formData = new FormData(registerForm);
+        const payload = {
+            csrfmiddlewaretoken: formData.get('csrfmiddlewaretoken'),
+            first_name: formData.get('first_name'),
+            last_name: formData.get('last_name'),
+            username: formData.get('username'),
+            email: formData.get('email'),
+            password1: formData.get('password1'),
+            password2: formData.get('password2'),
+            phone_number: formData.get('phone_number'),
+            location: formData.get('location'),
+            terms: formData.get('terms') === 'on'
+        };
+
+        wsManager.send('register', payload);
+    });
+
+    wsManager.on('register_response', function(data) {
+        submitBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Account';
+        submitBtn.disabled = false;
+
+        if (data.success) {
+            window.location.href = data.redirect || "{% url 'verification_required' %}";
+        } else {
+            if (data.errors) {
+                if (data.errors.__all__) {
+                    const allErr = data.errors.__all__;
+                    if (typeof allErr === 'string') {
+                        showGlobalMessage(allErr, 'danger');
+                    } else if (Array.isArray(allErr)) {
+                        const msgs = allErr.map(e => (e && e.message) ? e.message : (typeof e === 'string' ? e : JSON.stringify(e)));
+                        showGlobalMessage(msgs.join(' '), 'danger');
+                    }
+                }
+                for (let field in data.errors) {
+                    if (field === '__all__') continue;
+                    const input = document.querySelector(`[name="${field}"]`);
+                    const fieldErr = data.errors[field];
+                    let message = '';
+                    if (typeof fieldErr === 'string') message = fieldErr;
+                    else if (Array.isArray(fieldErr)) {
+                        if (fieldErr.length && fieldErr[0].message) message = fieldErr[0].message;
+                        else message = fieldErr.map(e => (e && e.message) ? e.message : (typeof e === 'string' ? e : JSON.stringify(e))).join(' ');
+                    } else message = JSON.stringify(fieldErr);
+
+                    if (input) {
+                        input.classList.add('error');
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'error-message';
+                        errorDiv.style.color = 'var(--danger)';
+                        errorDiv.style.fontSize = '0.75rem';
+                        errorDiv.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${message}`;
+                        input.parentNode.insertAdjacentElement('afterend', errorDiv);
+                    } else {
+                        showGlobalMessage(message, 'danger');
+                    }
+                }
+            } else {
+                showGlobalMessage(data.message || 'Registration failed.', 'danger');
+            }
+        }
+    });
+
+    // ========== Verification Modal & Resend ==========
+    // (The modal is initially hidden. It would be shown after successful registration,
+    // but we already redirect to the verification page. The modal code is kept
+    // for completeness if you decide to show it inline instead.)
+
+    let failedAttempts = 0;
+    const MAX_ATTEMPTS = 3;
+    const verificationCode = document.getElementById('verificationCode');
+    if (verificationCode) {
+        verificationCode.addEventListener('input', function() {
+            if (failedAttempts >= MAX_ATTEMPTS) return;
+            if (this.value.length === 7) verifyCode(this.value);
+        });
+    }
+
+    function verifyCode(code) {
+        // Get user_id from somewhere (e.g., data attribute on modal)
+        const userId = document.getElementById('verificationModal').dataset.userId;
+        if (!userId) return;
+        wsManager.send('verify', { user_id: userId, code });
+    }
+
+    wsManager.on('verify_response', function(data) {
+        if (data.success) {
+            showGlobalMessage('Email verified! Redirecting...', 'success');
+            setTimeout(() => window.location.href = data.redirect || '/', 2000);
+        } else {
+            document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">${data.error}</span>`;
+            failedAttempts = (data.attempts_left !== undefined) ? (MAX_ATTEMPTS - data.attempts_left) : (failedAttempts + 1);
+            if (failedAttempts >= MAX_ATTEMPTS) {
+                document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">Maximum verification attempts reached. Try again tomorrow.</span>`;
+                verificationCode.disabled = true;
+                resendBtn.disabled = true;
+            } else {
+                verificationCode.value = '';
+                verificationCode.focus();
+            }
+        }
+    });
+
+    const resendBtn = document.getElementById('resendBtn');
+    if (resendBtn) {
+        resendBtn.addEventListener('click', function() {
+            const userId = document.getElementById('verificationModal').dataset.userId;
+            if (!userId) return;
+            const originalHTML = resendBtn.innerHTML;
+            resendBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sending...';
+            resendBtn.disabled = true;
+
+            wsManager.send('resend', { user_id: userId });
+        });
+    }
+
+    wsManager.on('resend_response', function(data) {
+        if (resendBtn) {
+            resendBtn.innerHTML = 'Resend Code';
+            resendBtn.disabled = false;
+        }
+        if (data.success) {
+            document.getElementById('verificationMessage').innerHTML = '<span class="text-success">Code resent.</span>';
+            startResendTimer(60);
+        } else if (data.wait) {
+            startResendTimer(data.wait);
+            document.getElementById('verificationMessage').innerHTML = `<span class="text-warning">Please wait ${data.wait}s.</span>`;
+        } else {
+            document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">${data.error}</span>`;
+        }
+    });
+
+    function startResendTimer(seconds) {
+        resendBtn.disabled = true;
+        let remaining = seconds;
+        const timerDisplay = document.getElementById('timerDisplay');
+        timerDisplay.textContent = `Resend in ${remaining}s`;
+        const timerInterval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(timerInterval);
+                resendBtn.disabled = false;
+                timerDisplay.textContent = '';
+            } else {
+                timerDisplay.textContent = `Resend in ${remaining}s`;
+            }
+        }, 1000);
+    }
+
+    // Remove inline errors on input
     document.querySelectorAll('.input-modern').forEach(input => {
         input.addEventListener('input', function() {
             this.classList.remove('error');

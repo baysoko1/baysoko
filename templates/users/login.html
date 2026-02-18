@@ -36,7 +36,7 @@
         overflow: hidden;
     }
 
-    /* ===== RAINING ICONS BACKGROUND (replaces galaxy) ===== */
+    /* ===== RAINING ICONS BACKGROUND ===== */
     .rain-container {
         position: fixed;
         top: 0;
@@ -51,7 +51,7 @@
     .rain-icon {
         position: absolute;
         color: rgba(255, 255, 255, 0.25);
-        font-size: 2rem; /* base size, will be overridden inline */
+        font-size: 2rem;
         opacity: 0;
         animation: bounce-rain linear infinite;
         will-change: transform;
@@ -68,7 +68,7 @@
             opacity: 0.7;
         }
         80% {
-            transform: translateY(60vh) translateX(5px) rotate(240deg); /* bounce up */
+            transform: translateY(60vh) translateX(5px) rotate(240deg);
             opacity: 0.7;
         }
         100% {
@@ -90,7 +90,7 @@
         border-right: 1px solid var(--border-color);
         height: 100vh;
         overflow-y: hidden;
-        backdrop-filter: blur(4px); /* slight blur to make text pop over icons */
+        backdrop-filter: blur(4px);
     }
     .form-section::-webkit-scrollbar {
         width: 0;
@@ -333,12 +333,12 @@
         font-weight: 600;
     }
 
-    /* ===== RIGHT COLUMN: VERTICAL CAROUSEL (transparent background) ===== */
+    /* ===== RIGHT COLUMN: VERTICAL CAROUSEL ===== */
     .creative-section {
         flex: 1;
         position: relative;
         overflow: hidden;
-        background: transparent; /* let rain icons show through */
+        background: transparent;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -348,7 +348,6 @@
         height: 100vh;
     }
 
-    /* Baysoko Marketplace heading */
     .marketplace-heading {
         text-align: center;
         margin-bottom: 0.5rem;
@@ -372,7 +371,6 @@
         text-shadow: 0 1px 4px rgba(0,0,0,0.3);
     }
 
-    /* Vertical Carousel (cards remain semi‑transparent) */
     .carousel-vertical {
         position: relative;
         z-index: 2;
@@ -454,12 +452,10 @@
         pointer-events: none;
     }
 
-    /* Indicators hidden */
     .carousel-indicators {
         display: none !important;
     }
 
-    /* Animated footer – desktop */
     .animated-footer-desktop {
         position: absolute;
         bottom: 15px;
@@ -472,7 +468,6 @@
         border-radius: 50px;
         border: 1px solid rgba(255,255,255,0.2);
     }
-    /* Mobile footer */
     .animated-footer-mobile {
         display: none;
         text-align: center;
@@ -561,7 +556,7 @@
 
 {% block content %}
 <div class="login-container">
-    <!-- RAINING ICONS BACKGROUND (replaces galaxy) -->
+    <!-- RAINING ICONS BACKGROUND -->
     <div class="rain-container" id="rainContainer"></div>
 
     <!-- LEFT: Login Form -->
@@ -593,7 +588,7 @@
             <div class="divider"><span>Or sign in with email</span></div>
         </div>
 
-        <!-- Login Form (AJAX) -->
+        <!-- Login Form (WebSocket) -->
         <form method="post" id="loginForm" novalidate data-no-ajax>
             {% csrf_token %}
             <div class="form-group-modern">
@@ -695,9 +690,8 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // ========== RAINING ICONS (ENHANCED) ==========
+    // ========== RAINING ICONS ==========
     const rainContainer = document.getElementById('rainContainer');
-    // Expanded list of household item Bootstrap Icon classes
     const icons = [
         'bi-house', 'bi-house-door', 'bi-fridge', 'bi-tv', 'bi-phone',
         'bi-laptop', 'bi-cup', 'bi-cup-straw', 'bi-egg-fried', 'bi-basket',
@@ -716,34 +710,27 @@ document.addEventListener('DOMContentLoaded', function() {
         const icon = document.createElement('i');
         const randomIcon = icons[Math.floor(Math.random() * icons.length)];
         icon.className = `bi ${randomIcon} rain-icon`;
-        // Random size between 1.5rem and 4rem
-        const size = Math.random() * 2.5 + 1.5; // 1.5rem to 4rem
+        const size = Math.random() * 2.5 + 1.5;
         icon.style.fontSize = size + 'rem';
         icon.style.left = Math.random() * 100 + '%';
-        // Slower animation: 8s to 15s
-        icon.style.animationDuration = (Math.random() * 7 + 8) + 's'; // 8-15s
+        icon.style.animationDuration = (Math.random() * 7 + 8) + 's';
         icon.style.animationDelay = Math.random() * 10 + 's';
         icon.style.opacity = '0';
-        // Random pastel color with low opacity
         const r = Math.floor(Math.random() * 200 + 55);
         const g = Math.floor(Math.random() * 200 + 55);
         const b = Math.floor(Math.random() * 200 + 55);
         icon.style.color = `rgba(${r}, ${g}, ${b}, 0.3)`;
         rainContainer.appendChild(icon);
 
-        // Remove after animation ends to avoid DOM bloat
         const duration = parseFloat(icon.style.animationDuration) * 1000;
         setTimeout(() => {
             if (icon.parentNode) icon.remove();
-        }, duration + 2000); // extra buffer
+        }, duration + 2000);
     }
 
-    // Generate initial batch (more icons)
     for (let i = 0; i < 180; i++) {
         createRainIcon();
     }
-
-    // Continuously add new icons at a higher frequency
     setInterval(createRainIcon, 200);
 
     // ========== CAROUSEL ==========
@@ -766,12 +753,6 @@ document.addEventListener('DOMContentLoaded', function() {
         carousel.addEventListener('mouseenter', () => clearInterval(autoSlide));
         carousel.addEventListener('mouseleave', () => {
             autoSlide = setInterval(() => updateCarousel(currentIndex + 1), 5000);
-        });
-
-        window.addEventListener('resize', () => {
-            track.style.transition = 'none';
-            track.style.transform = `translateY(-${currentIndex * 100}%)`;
-            requestAnimationFrame(() => { track.style.transition = ''; });
         });
     }
 
@@ -805,80 +786,102 @@ document.addEventListener('DOMContentLoaded', function() {
         if (saved) rememberCheckbox.classList.add('checked');
     }
 
-    // ========== AJAX LOGIN ==========
-    const loginForm = document.getElementById('loginForm');
-    if (loginForm) {
-        loginForm.addEventListener('submit', function(e) {
-            if (loginForm.dataset.ajaxSubmitting === '1') { e.preventDefault(); return; }
-            loginForm.dataset.ajaxSubmitting = '1';
-            e.preventDefault();
-            const formData = new FormData(loginForm);
-            const submitBtn = document.getElementById('submitButton');
-            const originalText = submitBtn.innerHTML;
-            submitBtn.innerHTML = '<span class="custom-spinner" role="status" aria-hidden="true" style="width:1rem;height:1rem;"></span> Signing In...';
-            submitBtn.disabled = true;
-            document.querySelectorAll('.error-message').forEach(el => el.remove());
+    // ========== WebSocket Manager ==========
+    const wsManager = (function() {
+        let socket = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        const reconnectBaseDelay = 1000;
+        const messageQueue = [];
+        let isConnected = false;
+        let messageHandlers = {}; // type -> callback
 
-            fetch("{% url 'login' %}", {
-                method: 'POST',
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRFToken': formData.get('csrfmiddlewaretoken')
-                },
-                body: formData
-            })
-            .then(response => {
-                submitBtn.innerHTML = originalText;
-                submitBtn.disabled = false;
-                if (response.redirected) {
-                    window.location.href = response.url;
-                    return null;
+        function getWebSocketUrl() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            return `${protocol}//${host}/ws/auth/`;
+        }
+
+        function connect() {
+            if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+            const wsUrl = getWebSocketUrl();
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function() {
+                console.log('WebSocket connected');
+                isConnected = true;
+                reconnectAttempts = 0;
+                // Send any queued messages
+                while (messageQueue.length > 0) {
+                    const msg = messageQueue.shift();
+                    socket.send(JSON.stringify(msg));
                 }
-                const ct = response.headers.get('content-type') || '';
-                if (ct.includes('application/json')) return response.json();
-                return response.text().then(() => { window.location.reload(); return null; });
-            })
-            .then(data => {
-                if (!data) return;
-                console.log('Login response:', data);
-                if (data.success) {
-                    showGlobalMessage('Login successful! Redirecting...', 'success');
-                    if (rememberInput.checked) localStorage.setItem('rememberMe', 'true');
-                    else localStorage.removeItem('rememberMe');
-                    setTimeout(() => window.location.href = data.redirect || '/', 1500);
-                } else {
-                    if (data.errors) {
-                        if (data.errors.__all__) showGlobalMessage(data.errors.__all__.join(' '), 'danger');
-                        for (let field in data.errors) {
-                            const input = document.querySelector(`[name="${field}"]`);
-                            if (input) {
-                                input.classList.add('error');
-                                const errorDiv = document.createElement('div');
-                                errorDiv.className = 'error-message';
-                                errorDiv.style.color = 'var(--danger)';
-                                errorDiv.style.fontSize = '0.75rem';
-                                errorDiv.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.errors[field][0].message || data.errors[field][0]}`;
-                                input.parentNode.insertAdjacentElement('afterend', errorDiv);
-                            } else {
-                                showGlobalMessage(data.errors[field].join(' '), 'danger');
-                            }
-                        }
+            };
+
+            socket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket message received:', data);
+                    const type = data.type;
+                    if (type && messageHandlers[type]) {
+                        messageHandlers[type](data);
                     } else {
-                        showGlobalMessage(data.message || 'Login failed.', 'danger');
+                        console.warn('No handler for message type:', type);
                     }
+                } catch (e) {
+                    console.error('Failed to parse WebSocket message', e);
                 }
-            })
-            .catch(error => {
-                console.error('Login AJAX error:', error);
-                submitBtn.innerHTML = originalText;
-                submitBtn.disabled = false;
-                showGlobalMessage('Network error. Please try again.', 'danger');
-            }).finally(() => {
-                try { delete loginForm.dataset.ajaxSubmitting; } catch(e) {}
-            });
-        });
-    }
+            };
 
+            socket.onerror = function(error) {
+                console.error('WebSocket error', error);
+            };
+
+            socket.onclose = function(event) {
+                console.log('WebSocket closed', event);
+                isConnected = false;
+                socket = null;
+                // Attempt reconnect
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const delay = reconnectBaseDelay * Math.pow(2, reconnectAttempts);
+                    reconnectAttempts++;
+                    setTimeout(connect, delay);
+                } else {
+                    showGlobalMessage('Connection lost. Please refresh the page.', 'danger');
+                }
+            };
+        }
+
+        function sendMessage(type, payload) {
+            const msg = { type, ...payload };
+            if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(msg));
+            } else {
+                // Queue for later
+                messageQueue.push(msg);
+                // If not connected at all, start connecting
+                if (!socket || socket.readyState === WebSocket.CLOSED) {
+                    connect();
+                }
+            }
+        }
+
+        function onMessageType(type, callback) {
+            messageHandlers[type] = callback;
+        }
+
+        // Initialize connection
+        connect();
+
+        return {
+            send: sendMessage,
+            on: onMessageType
+        };
+    })();
+
+    // ========== Global message display ==========
     function showGlobalMessage(message, type) {
         const container = document.getElementById('globalMessageContainer');
         if (!container) return;
@@ -891,6 +894,69 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(() => msgDiv.remove(), 300);
         }, 4000);
     }
+
+    // ========== LOGIN via WebSocket ==========
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submitButton');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<span class="custom-spinner" role="status" aria-hidden="true" style="width:1rem;height:1rem;"></span> Signing In...';
+            submitBtn.disabled = true;
+            // Clear previous errors
+            document.querySelectorAll('.error-message').forEach(el => el.remove());
+
+            const username = document.getElementById('id_username').value;
+            const password = document.getElementById('id_password').value;
+            const remember = rememberInput.checked;
+
+            wsManager.send('login', {
+                username,
+                password,
+                remember,
+                csrfmiddlewaretoken: document.querySelector('[name=csrfmiddlewaretoken]').value
+            });
+
+            // We'll handle the response in the handler registered below
+            // But we need to re-enable button if error occurs; we'll do that in the handler
+        });
+    }
+
+    // Register login response handler
+    wsManager.on('login_response', function(data) {
+        const submitBtn = document.getElementById('submitButton');
+        if (submitBtn) {
+            submitBtn.innerHTML = '<i class="bi bi-box-arrow-in-right"></i> Sign In';
+            submitBtn.disabled = false;
+        }
+        if (data.success) {
+            showGlobalMessage('Login successful! Redirecting...', 'success');
+            if (rememberInput.checked) localStorage.setItem('rememberMe', 'true');
+            else localStorage.removeItem('rememberMe');
+            setTimeout(() => window.location.href = data.redirect || '/', 1500);
+        } else {
+            if (data.errors) {
+                if (data.errors.__all__) showGlobalMessage(data.errors.__all__.join(' '), 'danger');
+                for (let field in data.errors) {
+                    const input = document.querySelector(`[name="${field}"]`);
+                    if (input) {
+                        input.classList.add('error');
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'error-message';
+                        errorDiv.style.color = 'var(--danger)';
+                        errorDiv.style.fontSize = '0.75rem';
+                        errorDiv.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.errors[field][0].message || data.errors[field][0]}`;
+                        input.parentNode.insertAdjacentElement('afterend', errorDiv);
+                    } else {
+                        showGlobalMessage(data.errors[field].join(' '), 'danger');
+                    }
+                }
+            } else {
+                showGlobalMessage(data.message || 'Login failed.', 'danger');
+            }
+        }
+    });
 
     // Remove inline errors on input
     document.querySelectorAll('.input-modern').forEach(input => {

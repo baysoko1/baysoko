@@ -272,6 +272,7 @@ TEMPLATES = [
                 'storefront.context_processors.bulk_operations_context',
                 'storefront.context_processors.subscription_context',
                 'blog.context_processors.blog_sidebar',
+                'baysoko.context_processors.global_counts',
             ],
         },
     },
@@ -323,11 +324,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Channels (WebSocket) configuration - in-memory layer for development
 ASGI_APPLICATION = 'baysoko.asgi.application'
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer'
-    }
-}
 
 # Login/Logout redirects
 LOGIN_REDIRECT_URL = 'home'
@@ -760,11 +756,26 @@ CACHES = {
 }
 
 # Channels Configuration
+# Prefer full Redis URL strings for channels_redis. If REDIS_URL is a proper
+# redis:// URL use that directly; otherwise try to parse host/port as a fallback.
+try:
+    if REDIS_URL and isinstance(REDIS_URL, str) and REDIS_URL.startswith('redis://'):
+        channels_hosts = [REDIS_URL]
+    else:
+        # attempt to parse host and port
+        from urllib.parse import urlparse
+        parsed = urlparse(REDIS_URL)
+        host = parsed.hostname or 'localhost'
+        port = parsed.port or 6379
+        channels_hosts = [(host, port)]
+except Exception:
+    channels_hosts = ['redis://localhost:6379/1']
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [(REDIS_URL.split('://')[1])],
+            "hosts": channels_hosts,
         },
     },
 }

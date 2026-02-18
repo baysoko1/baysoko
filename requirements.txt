@@ -60,3 +60,5 @@ reportlab==4.0.4
 channels-redis==4.1.0
 django-import-export==3.2.0
 pandas==2.2.3
+
+daphne==4.0.0

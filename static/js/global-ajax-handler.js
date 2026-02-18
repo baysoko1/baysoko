@@ -146,6 +146,11 @@
                 if(icon){
                     // Save original icon HTML and replace with spinner
                     btn.dataset._origIcon = icon.outerHTML;
+                    // Try to inherit the icon's computed color so spinner matches
+                    try {
+                        const iconColor = window.getComputedStyle(icon).color || window.getComputedStyle(btn).color;
+                        if (iconColor) spinnerWrap.style.color = iconColor;
+                    } catch (e) {}
                     icon.replaceWith(spinnerWrap);
                     btn.__btnSpinner = spinnerWrap;
                     return;
@@ -225,6 +230,8 @@
                 btn.style.position = '';
                 delete btn.dataset.prevPosition;
             }
+            // Clear any inline color set by helpers so icon color returns to CSS-controlled value
+            try { btn.style.color = ''; } catch (e) {}
         }
 
     function setFormLoading(form, text){
