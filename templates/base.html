@@ -145,7 +145,7 @@
             top: 20px;
             right: 20px;
             z-index: 9999;
-            max-width: 380px;
+            max-width: 383px; /* increased by 3px */
             display: flex;
             flex-direction: column;
             gap: 0.75rem;
@@ -167,12 +167,12 @@
             gap: 0.5rem;
             padding: 0.6rem 1.2rem;
             color: white;
-            font-size: 0.85rem;
-            max-width: 320px;
+            font-size: 0.82rem; /* slightly reduced */
+            max-width: 323px; /* increased by 3px */
         }
 
         .custom-toast i { font-size: 1rem; flex-shrink: 0; }
-        .custom-toast .fw-medium { font-size: 0.85rem; line-height: 1.15; word-break: break-word; }
+        .custom-toast .fw-medium { font-size: 0.8rem; line-height: 1.12; word-break: break-word; }
         .custom-toast .btn-close { opacity: 0.9; filter: drop-shadow(0 1px 0 rgba(0,0,0,0.12)); }
 
         /* Progress/countdown bar at bottom of toast (compact) */
@@ -826,10 +826,11 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: var(--spacing-xl);
-            padding: 0 var(--spacing-lg) var(--spacing-md);
+            /* Slightly reduce spacing to match compact side-nav */
+            margin-bottom: calc(var(--spacing-xl) - 10px);
+            padding: 0 var(--spacing-lg) calc(var(--spacing-md) - 10px);
             border-bottom: 1px solid var(--border-color);
-            min-height: 60px;
+            min-height: 50px;
         }
 
         .side-nav-logo {
@@ -882,13 +883,15 @@
             display: flex;
             align-items: center;
             gap: var(--spacing-md);
-            padding: var(--spacing-md) var(--spacing-lg);
+            /* Reduce vertical padding by ~10px while preserving horizontal spacing */
+            padding: calc(var(--spacing-md) - 10px) var(--spacing-lg);
             color: var(--text-primary);
             text-decoration: none;
             border-radius: 0;
             transition: var(--transition-fast);
             position: relative;
-            min-height: 60px;
+            /* Reduce min-height by 10px to keep visual density */
+            min-height: 50px;
             white-space: nowrap;
         }
 
@@ -1189,6 +1192,63 @@
             .side-nav.expanded ~ .bottom-nav {
                 margin-left: 0;
             }
+            .mobile-actions {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                /* Ensure actions remain on a single row and can scroll when overflowing */
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                padding: 2px 0;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: thin;
+            }
+
+            .mobile-actions .btn-custom {
+                -webkit-tap-highlight-color: transparent;
+                transition: background-color 0.2s ease, transform 0.1s ease;
+            }
+            
+            .mobile-actions .btn-custom:active {
+                background: var(--primary) !important;
+                color: white !important;
+                transform: scale(0.97);
+            }
+            
+            .mobile-actions .btn-custom.loading {
+                background: var(--primary-dark) !important;
+                color: white !important;
+                pointer-events: none;
+            }
+        
+            /* Provide a subtle thumb for webkit browsers */
+            .mobile-actions::-webkit-scrollbar {
+                height: 6px;
+            }
+
+            .mobile-actions::-webkit-scrollbar-thumb {
+                background: rgba(0,0,0,0.08);
+                border-radius: 999px;
+            }
+
+            .mobile-actions .btn-custom i {
+                margin: 0;
+                color: var(--primary);
+            }
+
+            .mobile-actions .theme-toggle {
+                padding: 8px;
+                color: var(--primary) !important;
+            }
+
+            .mobile-actions .dropdown-toggle::after {
+                display: none;
+            }
+
+            .dropdown-menu {
+                min-width: 200px;
+                z-index: 3;
+            }
         }
 
         @media (max-width: 768px) {
@@ -1269,11 +1329,22 @@
             }
 
             .mobile-actions .btn-custom {
-                padding: 8px;
-                min-width: 44px;
-                flex: 0 0 auto;
+                -webkit-tap-highlight-color: transparent;
+                transition: background-color 0.2s ease, transform 0.1s ease;
             }
-
+            
+            .mobile-actions .btn-custom:active {
+                background: var(--primary) !important;
+                color: white !important;
+                transform: scale(0.97);
+            }
+            
+            .mobile-actions .btn-custom.loading {
+                background: var(--primary-dark) !important;
+                color: white !important;
+                pointer-events: none;
+            }
+        
             /* Provide a subtle thumb for webkit browsers */
             .mobile-actions::-webkit-scrollbar {
                 height: 6px;
@@ -1286,14 +1357,12 @@
 
             .mobile-actions .btn-custom i {
                 margin: 0;
-            }
-
-            .mobile-actions .btn-custom span {
-                display: none;
+                color: var(--primary);
             }
 
             .mobile-actions .theme-toggle {
                 padding: 8px;
+                color: var(--primary);
             }
 
             .mobile-actions .dropdown-toggle::after {
@@ -1598,7 +1667,71 @@
         #globalMessageContainer .global-info    { background: #118AB2; }
     </style>
 
+    <style>
+        /* Ensure unified count badges are hidden when zero.
+           This covers empty badges and badges with data-count="0".
+        */
+        .unified-count-badge:empty,
+        .unified-count-badge[data-count="0"],
+        .unified-count-badge[data-count="0"]:not(.always-visible) {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+    </style>
+
     {% block extra_css %}{% endblock %}
+    <style>
+        /* Compact spacing overrides: reduce vertical spacing between sections by ~80% */
+        .horizontal-scroll-section,
+        .featured-section,
+        .ad-section,
+        .stats-section,
+        section {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+        }
+
+        /* Reduce section header spacing */
+        .section-header {
+            margin-bottom: 0.4rem !important;
+            padding-bottom: 0 !important;
+        }
+
+        .section-title { margin-bottom: 0.2rem !important; }
+        .section-subtitle { margin-top: 0 !important; margin-bottom: 0.4rem !important; }
+
+        /* Reduce common in-section vertical paddings/margins by ~50% */
+        .horizontal-scroll-section .scroll-content,
+        .container-custom .listings-grid,
+        .listing-card .listing-content,
+        .store-card .store-description,
+        .featured-section .listings-grid {
+            gap: calc(var(--spacing-lg, 24px) * 0.5) !important;
+            padding-top: calc(var(--spacing-md, 16px) * 0.5) !important;
+            padding-bottom: calc(var(--spacing-md, 16px) * 0.5) !important;
+        }
+
+        /* Tighter listing internals */
+        .listing-content { padding: 0.6rem !important; }
+        .listing-meta { margin-bottom: 0.25rem !important; }
+        .listing-store { margin-bottom: 0.25rem !important; }
+
+        /* Ensure category badges have consistent icon + styling across site */
+        .listing-category-badge,
+        .listing-category {
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            backdrop-filter: blur(16px);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+    </style>
 </head>
 <body>
     
@@ -2334,6 +2467,7 @@
             // ============================================
             
             // Initialize BadgeManager
+            // (Badge elements are expected to be rendered by templates; keep initialization simple)
             window.BadgeManager.initialize();
             
             // Start polling if user is authenticated
@@ -2375,6 +2509,15 @@
                 } catch (err) { console.warn(err); }
             });
 
+            // Show toast when new messages arrive via real-time event
+            document.addEventListener('newMessageReceived', function(e) {
+                try {
+                    const sender = e && e.detail && (e.detail.from_name || e.detail.sender_name || e.detail.user || e.detail.from) ? (e.detail.from_name || e.detail.sender_name || e.detail.user || e.detail.from) : null;
+                    const title = sender ? `New message from ${sender}` : 'New message received';
+                    if (window.showToast) showToast(title, 'info', 4000);
+                } catch (err) { console.warn('Failed showing new message toast', err); }
+            });
+
             document.addEventListener('messagesRead', function(e) {
                 try {
                     const removed = (e && e.detail && e.detail.removed) ? parseInt(e.detail.removed) : 0;
@@ -2400,6 +2543,15 @@
 
                     setTimeout(() => { if (window.refreshNotificationsCount) window.refreshNotificationsCount(); }, 500);
                 } catch (err) { console.warn(err); }
+            });
+
+            // Show toast for incoming notifications if payload includes title/message
+            document.addEventListener('notificationReceived', function(e) {
+                try {
+                    const detail = e && e.detail ? e.detail : {};
+                    const title = detail.title || detail.message || (detail.count ? `You have ${detail.count} new notifications` : null);
+                    if (title && window.showToast) showToast(title, 'primary', 4500);
+                } catch (err) { console.warn('Failed showing notification toast', err); }
             });
 
             // Add logged-in body class so footer can be hidden via CSS
@@ -2867,6 +3019,82 @@
                     });
                 });
             });
+
+            // Mobile actions: delegate loading UI to the global AJAX handler.
+            // The global handler exposes `window.UIHelpers.setButtonLoading` which
+            // will insert the spinner and swap the icon on small screens while
+            // preserving button layout and accessibility attributes.
+            (function() {
+                const mobileActionsContainer = document.querySelector('.mobile-actions');
+                if (!mobileActionsContainer) return;
+
+                mobileActionsContainer.addEventListener('click', function(e) {
+                    const btn = e.target.closest('.btn-custom, a, button');
+                    if (!btn) return;
+
+                    // Don't apply the global spinner to theme toggles (desktop or mobile)
+                    if (btn.classList.contains('theme-toggle') || btn.id === 'themeToggleMobile' || btn.id === 'themeToggleDesktop' || (btn.closest && btn.closest('.theme-toggle'))) {
+                        return;
+                    }
+
+                    // If there's already a spinner or loading marker, skip
+                    if (btn.dataset.originalHtml || btn.classList.contains('loading')) return;
+
+                    // Only intercept and show the global spinner for AJAX-style controls.
+                    // - Allow normal <a> navigation to proceed (no spinner) unless explicitly marked
+                    //   with `data-ajax="true"` or `ajax-link` class.
+                    // - For <button> elements, only apply spinner when they indicate async work
+                    //   via `data-ajax`, `data-action="ajax"`, or known classes like `action-cart`.
+                    const tag = (btn.tagName || '').toUpperCase();
+                    const isMarkedAjax = btn.dataset && (btn.dataset.ajax === 'true' || btn.dataset.action === 'ajax');
+                    const isAjaxClass = btn.classList.contains('ajax-link') || btn.classList.contains('ajax') || btn.classList.contains('action-cart') || btn.classList.contains('add-to-cart-btn');
+
+                    if (tag === 'A' && !isMarkedAjax && !isAjaxClass) {
+                        // Let normal link navigation (including anchors) proceed without spinner.
+                        return;
+                    }
+
+                    if (tag === 'BUTTON' || tag === 'INPUT') {
+                        if (!isMarkedAjax && !isAjaxClass) {
+                            // Not an AJAX button — skip spinner to preserve instant feedback and theming.
+                            return;
+                        }
+                    }
+
+                    try {
+                        if (window.UIHelpers && typeof window.UIHelpers.setButtonLoading === 'function') {
+                            // Ensure the icon/spinner will be visible by forcing
+                            // button text/icon color to white while spinner present.
+                            try { btn.style.color = '#fff'; } catch (e) {}
+                            window.UIHelpers.setButtonLoading(btn, 'Please wait');
+
+                            // Keep spinner/icon color enforced while spinner exists
+                            const watcher = setInterval(() => {
+                                const spinner = btn.__btnSpinner || btn.querySelector('.custom-spinner');
+                                if (spinner) {
+                                    try { spinner.style.color = '#fff'; } catch (e) {}
+                                }
+
+                                // If spinner was removed, clean up
+                                if (!btn.__btnSpinner && !btn.querySelector('.custom-spinner')) {
+                                    try { btn.style.color = ''; } catch (e) {}
+                                    clearInterval(watcher);
+                                }
+                            }, 120);
+                        } else {
+                            // Fallback: minimal visual cue for marked AJAX controls
+                            btn.classList.add('loading');
+                            try{ btn.style.color = '#fff'; }catch(e){}
+                            setTimeout(() => {
+                                btn.classList.remove('loading');
+                                try{ btn.style.color = ''; }catch(e){}
+                            }, 1500);
+                        }
+                    } catch (err) {
+                        console.warn('Error invoking global spinner', err);
+                    }
+                }, true);
+            })();
         });
 
         // Handle window resize
@@ -3199,5 +3427,23 @@
 
     <!-- Include global AJAX handler -->
     <script src="{% static 'js/global-ajax-handler.js' %}"></script>
+    <script>
+        // Remove empty/zero-count unified badges from the DOM to avoid
+        // leaving inert elements that pollers or CSS may still target.
+        document.addEventListener('DOMContentLoaded', function() {
+            try {
+                document.querySelectorAll('.unified-count-badge').forEach(function(b) {
+                    var count = b.getAttribute('data-count');
+                    var text = (b.textContent || '').trim();
+                    if (count === '0' || count === null && text === '') {
+                        // Remove the node entirely
+                        b.remove();
+                    }
+                });
+            } catch (e) {
+                console.warn('Badge cleanup failed', e);
+            }
+        });
+    </script>
 </body>
 </html>
