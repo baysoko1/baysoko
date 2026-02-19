@@ -2,8 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path('', views.inbox, name='inbox'),
-    path('api/my-listings/', views.my_listings, name='my-listings'),
+    path('', views.inbox, name='inbox'), 
     path('start/<int:listing_id>/<int:recipient_id>/', views.start_conversation, name='start-conversation'),
     path('api/grouped-conversations/', views.GroupedConversationsView.as_view(), name='grouped-conversations'),
     path('api/unread-messages-count/', views.UnreadMessagesCountView.as_view(), name='unread-messages-count'),
