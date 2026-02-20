@@ -2028,37 +2028,11 @@ let otherTypingName = '';
 let tempIdCounter = 0;
 let galleryImages = [];
 let galleryIndex = 0;
+
 // Map tempFileId -> objectURL for optimistic previews
 const tempFileMap = new Map();
-
-function createTempFilesForTempMessage(tempId, files) {
-    const attachmentsMeta = [];
-    files.forEach((file, idx) => {
-        try {
-            const tempFileId = `${tempId}_${idx}`;
-            const objectUrl = URL.createObjectURL(file);
-            tempFileMap.set(tempFileId, objectUrl);
-            attachmentsMeta.push({ name: file.name, type: file.type, size: file.size, tempFileId });
-        } catch (err) {
-            console.warn('createTempFilesForTempMessage error', err);
-            attachmentsMeta.push({ name: file.name, type: file.type, size: file.size });
-        }
-    });
-    return attachmentsMeta;
-}
-
-function revokeTempFiles(tempId) {
-    for (const key of Array.from(tempFileMap.keys())) {
-        if (key.startsWith(tempId + '_')) {
-            try { URL.revokeObjectURL(tempFileMap.get(key)); } catch (e) {}
-            tempFileMap.delete(key);
-        }
-    }
-}
-
-function isImageAttachment(att) {
-    return att && (att.type && att.type.startsWith('image/')) || (att.url && /\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i.test(att.url || ''));
-}
+// Map permanent message id -> array of tempFileIds created for optimistic send
+const permToTempFiles = new Map();
 
 // Archived conversations
 let archivedConversations = [];
@@ -2077,12 +2051,19 @@ let onlineUsersPollInterval = null;
 // Loading flag
 let isLoadingMessages = false;
 let lastFailedMessagesToastAt = 0;
-const FAILED_MESSAGES_TOAST_COOLDOWN = 30000; // 30s between 'failed to load messages' toasts
+const FAILED_MESSAGES_TOAST_COOLDOWN = 30000;
 
 // Scroll handling
 let isUserScrolled = false;
 let lastScrollTop = 0;
 let newMessagesAvailable = false;
+
+// WebSocket
+let chatSocket = null;
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const WS_RECONNECT_DELAY = 3000;
+let wsConnectionActive = false;
 
 // ========== UTILITY FUNCTIONS ==========
 function getCSRFToken() {
@@ -2105,8 +2086,6 @@ async function fetchJSON(url, options = {}) {
         return await response.json();
     } catch (error) {
         console.error('Fetch error:', error);
-        // Only show network error toasts when caller explicitly requests user-visible errors
-        // Callers can pass { showError: true } to display the toast.
         if (options && options.showError) {
             showToast('Network error. Please try again.', 'error');
         }
@@ -2132,7 +2111,6 @@ function showToast(message, type = 'info', duration = 3000) {
     }
 }
 
-// Compact time format for conversation list (e.g., "5m", "2h", "3d", "1wk")
 function formatCompactTime(dateString) {
     if (!dateString) return '';
     const date = new Date(dateString);
@@ -2150,7 +2128,6 @@ function formatCompactTime(dateString) {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-// For chat header: "Online" if online, else "Last seen X"
 function formatHeaderTime(dateString, isOnline) {
     if (!dateString) return isOnline ? 'Online' : 'Offline';
     const compact = formatCompactTime(dateString);
@@ -2202,7 +2179,6 @@ function escapeHtml(unsafe) {
     });
 }
 
-// Helper to find a message by id (for reply preview)
 function findMessageById(id) {
     let found = allMessages.find(m => m.id === id);
     if (found) return found;
@@ -2210,6 +2186,56 @@ function findMessageById(id) {
         if (msg.id === id || msg.tempId === id) return msg;
     }
     return null;
+}
+
+// ========== ATTACHMENT HELPERS ==========
+function createTempFilesForTempMessage(tempId, files) {
+    const attachmentsMeta = [];
+    files.forEach((file, idx) => {
+        try {
+            const tempFileId = `${tempId}_${idx}`;
+            const objectUrl = URL.createObjectURL(file);
+            tempFileMap.set(tempFileId, objectUrl);
+            attachmentsMeta.push({ name: file.name, type: file.type, size: file.size, tempFileId });
+        } catch (err) {
+            console.warn('createTempFilesForTempMessage error', err);
+            attachmentsMeta.push({ name: file.name, type: file.type, size: file.size });
+        }
+    });
+    return attachmentsMeta;
+}
+
+function revokeTempFiles(tempId) {
+    for (const key of Array.from(tempFileMap.keys())) {
+        if (key.startsWith(tempId + '_')) {
+            try { URL.revokeObjectURL(tempFileMap.get(key)); } catch (e) {}
+            tempFileMap.delete(key);
+        }
+    }
+}
+
+function mapTempToPerm(tempId, permId, attachmentsMeta) {
+    if (!attachmentsMeta || !attachmentsMeta.length) return;
+    const ids = attachmentsMeta.map(a => a.tempFileId).filter(Boolean);
+    if (ids.length) permToTempFiles.set(permId, ids);
+}
+
+function clearPermTempMappingIfResolved(permId, permAttachments) {
+    // If server attachments contain URLs for all attachments, revoke temp files
+    if (!permAttachments || !permAttachments.length) return false;
+    const allHaveUrls = permAttachments.every(a => a.url || a.file_url);
+    if (allHaveUrls && permToTempFiles.has(permId)) {
+        const ids = permToTempFiles.get(permId);
+        ids.forEach(id => { try { URL.revokeObjectURL(tempFileMap.get(id)); } catch (e) {} });
+        ids.forEach(id => tempFileMap.delete(id));
+        permToTempFiles.delete(permId);
+        return true;
+    }
+    return false;
+}
+
+function isImageAttachment(att) {
+    return att && (att.type && att.type.startsWith('image/')) || (att.url && /\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i.test(att.url || ''));
 }
 
 // ========== ONLINE USERS ==========
@@ -2279,7 +2305,7 @@ function updateHeaderTypingStatus() {
     if (!statusContainer) return;
     if (otherIsTyping) {
         statusContainer.innerHTML = '<span class="typing-status">Typing...</span>';
-        if (statusDot) statusDot.className = 'status-dot'; // remove online class
+        if (statusDot) statusDot.className = 'status-dot';
     } else {
         if (currentParticipantIsOnline) {
             statusContainer.innerText = 'Online';
@@ -2525,7 +2551,7 @@ async function unarchiveConversation(participantId) {
     } catch (e) {}
 }
 
-// ========== OPEN UNIFIED CONVERSATION (FIXED) ==========
+// ========== OPEN UNIFIED CONVERSATION ==========
 async function openUnifiedConversation(dataset) {
     const pid = parseInt(dataset?.participantId);
     currentParticipantId = pid;
@@ -2534,16 +2560,15 @@ async function openUnifiedConversation(dataset) {
     currentParticipantIsOnline = dataset.isOnline === 'true';
     currentParticipantLastSeen = dataset.lastSeen || null;
 
-    // Validate participant id
     if (isNaN(pid)) return;
 
-    // --- FIX: Clear previous conversation data ---
+    // Clear previous conversation data
     allMessages = [];
     conversationIds = [];
     lastMessageId = 0;
     temporaryMessages.clear();
 
-    // Update header (guard elements)
+    // Update header
     const participantNameEl = document.getElementById('participantName');
     const participantAvatarEl = document.getElementById('participantAvatar');
     const infoParticipantNameEl = document.getElementById('infoParticipantName');
@@ -2565,7 +2590,6 @@ async function openUnifiedConversation(dataset) {
     const messagesContainerEl = document.getElementById('messagesContainer');
     let spinner = document.getElementById('chatLoadingSpinner');
     if (messagesContainerEl) {
-        // clear existing messages but keep/restore spinner element
         messagesContainerEl.innerHTML = '';
         if (spinner && !messagesContainerEl.contains(spinner)) messagesContainerEl.appendChild(spinner);
         if (spinner) spinner.classList.add('active');
@@ -2585,8 +2609,6 @@ async function openUnifiedConversation(dataset) {
     const batchActionsBarEl = document.getElementById('batchActionsBar');
     if (batchActionsBarEl) batchActionsBarEl.classList.remove('active');
 
-    // ensure spinner shows for at least 1.5s while messages load
-    // allow fetch even if a previous fetch flag is set (user clicked again)
     isLoadingMessages = false;
     await Promise.all([
         fetchUnifiedMessages(pid),
@@ -2598,7 +2620,6 @@ async function openUnifiedConversation(dataset) {
     updateParticipantUnreadInSidebar(pid, 0);
     updateTotalUnreadCount();
 
-    // ensure scroll listener attached once
     const msgContainer = document.getElementById('messagesContainer');
     if (msgContainer) {
         try { msgContainer.removeEventListener('scroll', handleScroll); } catch (e) {}
@@ -2645,21 +2666,16 @@ async function fetchUnifiedMessages(participantId) {
                 if (newMsgs.length) {
                     allMessages.push(...newMsgs);
                     lastMessageId = Math.max(...newMsgs.map(m => m.id));
-                    // New messages arrived for this conversation — refresh conversation list and unread counts immediately
                     try { loadGroupedConversations(); updateTotalUnreadCount(); } catch (e) { console.warn('refresh grouped convs failed', e); }
                 }
             }
             lastMessageId = allMessages.length ? Math.max(...allMessages.map(m => m.id)) : 0;
             renderMessages();
 
-            // After rendering, if this conversation is currently active, mark messages as read on server
             if (participantId === currentParticipantId) {
                 try {
-                    // Clear UI badge immediately
                     updateParticipantUnreadInSidebar(participantId, 0);
-                    // Call server without last_id to mark unread as read (UnifiedConversationView does this when no last_id)
                     fetchJSON(baseUrl).then(() => {
-                        // Refresh grouped conversations and global counts
                         loadGroupedConversations();
                         updateTotalUnreadCount();
                     }).catch(err => console.warn('mark-read fetch failed', err));
@@ -2672,7 +2688,6 @@ async function fetchUnifiedMessages(participantId) {
         }
     } catch (e) {
         console.error(e);
-        // Avoid flooding toasts during polling — only show every FAILED_MESSAGES_TOAST_COOLDOWN ms
         const now = Date.now();
         if (now - lastFailedMessagesToastAt > FAILED_MESSAGES_TOAST_COOLDOWN) {
             showToast('Failed to load messages', 'error');
@@ -2688,12 +2703,10 @@ function renderMessages() {
     const container = document.getElementById('messagesContainer');
     if (!container) return;
 
-    // Preserve the loading spinner if present so overlay isn't removed by innerHTML reset
     const spinner = document.getElementById('chatLoadingSpinner');
     const spinnerWasInContainer = spinner && spinner.parentNode === container;
     if (spinnerWasInContainer) container.removeChild(spinner);
 
-    // capture scroll state before rendering so we can preserve position or show banner
     const prevScrollTop = container.scrollTop;
     const prevScrollHeight = container.scrollHeight;
     const atBottomBefore = (prevScrollTop + container.clientHeight) >= (prevScrollHeight - 50);
@@ -2722,16 +2735,13 @@ function renderMessages() {
 
     container.innerHTML = html;
 
-    // re-attach spinner overlay if it was removed
     if (spinner && !container.contains(spinner)) container.appendChild(spinner);
 
-    // Restore scroll position: if user was at bottom, stay at bottom. Otherwise preserve offset.
     const newScrollHeight = container.scrollHeight;
     if (atBottomBefore && !isUserScrolled) {
         container.scrollTop = newScrollHeight;
         isUserScrolled = false;
     } else {
-        // preserve visual position relative to content growth
         container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
         isUserScrolled = true;
     }
@@ -2752,47 +2762,32 @@ function renderMessageBubble(msg) {
     let attachmentsHtml = '';
     if (msg.attachments && msg.attachments.length) {
         attachmentsHtml = '<div class="message-attachments">';
-        msg.attachments.forEach(att => {
+        msg.attachments.forEach((att, attIdx) => {
             const fileUrl = att.url || att.file_url;
             const fileName = att.name || att.filename || 'Attachment';
             const encoded = encodeURIComponent(JSON.stringify(att));
-            if (att.type && att.type.startsWith('image/')) {
-                // Resolve image source. Prefer server URL (check multiple possible property names),
-                // then fall back to temporary object URLs created for optimistic messages.
-                const resolvedFileUrl = att.url || att.file_url || att.file || att.path || fileUrl || null;
-                let imgSrc = resolvedFileUrl || null;
-                let loadingOverlay = '';
-                try {
-                    if (!imgSrc && msg.tempId) {
-                        // Prefer explicit tempFileId attached to the attachment metadata
-                        if (att.tempFileId && tempFileMap.has(att.tempFileId)) {
-                            imgSrc = tempFileMap.get(att.tempFileId);
-                        } else if (msg.files && msg.files.length) {
-                            // Fallback: try to match by filename or use the first image file
-                            const localFile = msg.files.find(f => f.name === fileName) || msg.files.find(f => f.type && f.type.startsWith('image/'));
-                            if (localFile) {
-                                try {
-                                    const fallbackId = `${msg.tempId}_fallback_${Math.random().toString(36).slice(2,9)}`;
-                                    const objectUrl = URL.createObjectURL(localFile);
-                                    tempFileMap.set(fallbackId, objectUrl);
-                                    imgSrc = objectUrl;
-                                } catch (err) {
-                                    console.warn('createObjectURL fallback error', err);
-                                }
-                            }
-                        }
-                    }
-                } catch (e) { console.warn('local preview error', e); }
 
-                // Show spinner/overlay only when we truly don't have any preview yet
-                if (!imgSrc && !msg.tempId) {
-                    loadingOverlay = `<div class="attachment-overlay"><div class="spinner-border text-light" role="status" aria-hidden="true"></div></div>`;
+            if (att.type && att.type.startsWith('image/')) {
+                // Determine the image source
+                let imgSrc = att.url || att.file_url || null;
+                // If this is a temporary message and we have a tempFileId, use that
+                if (msg.tempId && att.tempFileId && tempFileMap.has(att.tempFileId)) {
+                    imgSrc = tempFileMap.get(att.tempFileId);
+                }
+                // If this is a permanent message but we still have a temp mapping, use it as fallback
+                if (!imgSrc && !msg.tempId && msg.id && permToTempFiles.has(msg.id)) {
+                    const tempIds = permToTempFiles.get(msg.id) || [];
+                    const tempId = tempIds[attIdx];
+                    if (tempId && tempFileMap.has(tempId)) {
+                        imgSrc = tempFileMap.get(tempId);
+                    }
                 }
 
-                const imgClass = (imgSrc && typeof imgSrc === 'string' && imgSrc.startsWith && imgSrc.startsWith('blob:') && msg.tempId) ? '' : (!imgSrc ? 'loading' : '');
+                // If still no source, maybe it's a permanent message that hasn't loaded yet; show a placeholder
+                const loadingOverlay = !imgSrc && !msg.tempId ? `<div class="attachment-overlay"><div class="spinner-border text-light" role="status" aria-hidden="true"></div></div>` : '';
 
                 attachmentsHtml += `<div class="attachment-item" data-attachment="${encoded}" onclick="showAttachmentViewerInline(this)">
-                    <div class="attachment-preview">${imgSrc ? `<img src="${imgSrc}" alt="${escapeHtml(fileName)}" class="${imgClass}">` : `<img src="" alt="${escapeHtml(fileName)}">`}</div>
+                    <div class="attachment-preview">${imgSrc ? `<img src="${imgSrc}" alt="${escapeHtml(fileName)}">` : `<img src="" alt="${escapeHtml(fileName)}" class="loading">`}</div>
                     ${loadingOverlay}
                     <div class="attachment-info">${escapeHtml(fileName)}</div>
                 </div>`;
@@ -2826,7 +2821,6 @@ function renderMessageBubble(msg) {
     }
 
     const pinStar = msg.is_pinned ? '<i class="bi bi-star-fill message-pin"></i>' : '';
-
     const selectedClass = selectedMessages.has(msg.id || msg.tempId) ? 'message-selected' : '';
 
     let statusClass = '';
@@ -2884,7 +2878,6 @@ async function sendMessage() {
     if (sendBtn) sendBtn.disabled = true;
 
     const tempId = 'temp_' + Date.now() + '_' + (tempIdCounter++);
-    // create temp file entries and objectURLs for optimistic preview
     const attachmentsMeta = createTempFilesForTempMessage(tempId, attachments);
     const tempMessage = {
         tempId: tempId,
@@ -2901,71 +2894,14 @@ async function sendMessage() {
     temporaryMessages.set(tempId, tempMessage);
     renderMessages();
 
-    // Optionally pre-upload images to Cloudinary when available and running in production (DEBUG=false)
+    // Build FormData for server
     const formData = new FormData();
     formData.append('participant_id', currentParticipantId);
     formData.append('content', content);
-
-    const useCloudinary = (typeof window.CLOUDINARY_UPLOAD_URL !== 'undefined' && typeof window.CLOUDINARY_UPLOAD_PRESET !== 'undefined' && (typeof window.DEBUG !== 'undefined' ? !window.DEBUG : false));
-    let uploaded = [];
-    if (useCloudinary) {
-        // Upload image files to Cloudinary in parallel, collect URLs
-        const imageFiles = attachments.filter(f => f.type && f.type.startsWith('image/'));
-        try {
-            uploaded = await Promise.all(imageFiles.map(file => {
-                const fd = new FormData();
-                fd.append('file', file);
-                fd.append('upload_preset', window.CLOUDINARY_UPLOAD_PRESET);
-                return fetch(window.CLOUDINARY_UPLOAD_URL, { method: 'POST', body: fd }).then(r => r.json());
-            }));
-            const urls = uploaded.filter(r => r && r.secure_url).map(r => r.secure_url);
-            urls.forEach(u => formData.append('remote_attachments', u));
-
-            // Remove loading state for images that finished uploading (optimistic UI)
-            uploaded.forEach((res, idx) => {
-                try {
-                    const file = imageFiles[idx];
-                    if (file && res && res.secure_url) {
-                        const selector = `.attachment-image[data-filename="${file.name}"]`;
-                        const el = document.querySelector(selector);
-                        if (el) {
-                            el.classList.remove('loading');
-                            const overlay = el.querySelector('.attachment-overlay');
-                            if (overlay) overlay.style.display = 'none';
-                        }
-                    }
-                } catch (e) {}
-            });
-        } catch (e) {
-            console.warn('Cloudinary upload failed, falling back to direct upload', e);
-            uploaded = [];
-        }
-    }
-
-    // Append non-image files always
-    const otherFiles = attachments.filter(f => !(f.type && f.type.startsWith('image/')));
-    otherFiles.forEach(f => formData.append('attachment', f));
-
-    // If using Cloudinary, only append original image files that failed to upload
-    if (useCloudinary) {
-        const imageFiles = attachments.filter(f => f.type && f.type.startsWith('image/'));
-        if (uploaded && uploaded.length === imageFiles.length) {
-            imageFiles.forEach((file, idx) => {
-                const res = uploaded[idx];
-                if (!(res && res.secure_url)) {
-                    formData.append('attachment', file);
-                }
-            });
-        } else {
-            // Upload did not run or partially failed — append all image files as fallback
-            imageFiles.forEach(f => formData.append('attachment', f));
-        }
-    } else {
-        // Not using Cloudinary — append all attachments (images already appended above as otherFiles excluded images)
-        // (no-op because non-image files appended and images were skipped when useCloudinary===false)
-        if (!useCloudinary) attachments.forEach(file => formData.append('attachment', file));
-    }
     if (replyingTo) formData.append('reply_to_id', replyingTo);
+
+    // Append all attachments (they will be saved locally or via Cloudinary on the server)
+    attachments.forEach(file => formData.append('attachment', file));
 
     try {
         const response = await fetch('/chats/api/send-unified-message/', {
@@ -2975,9 +2911,11 @@ async function sendMessage() {
         });
         const data = await response.json();
         if (data.success) {
-            // server accepted message — revoke any temp object URLs for this temp message
-            try { revokeTempFiles(tempId); } catch (e) {}
+            // Remove temporary message
             temporaryMessages.delete(tempId);
+            revokeTempFiles(tempId); // Clean up object URLs
+
+            // Add permanent message
             const newMsg = data.message;
             if (!allMessages.some(m => m.id === newMsg.id)) {
                 allMessages.push(newMsg);
@@ -3033,6 +2971,7 @@ function retryMessage(tempId) {
     replyingTo = null;
 
     temporaryMessages.delete(tempId);
+    revokeTempFiles(tempId);
     sendMessage();
 }
 
@@ -3072,14 +3011,11 @@ function createAttachmentPreview(file) {
     item.className = 'preview-item';
     if (file.type.startsWith('image/')) {
         const reader = new FileReader();
-        // Show a clear preview in the preview area (no blur/spinner). The chat
-        // message bubble will display a blurred loader for temporary messages.
         reader.onload = (e) => {
             item.innerHTML = `
                 <div class="attachment-image" data-filename="${file.name}" style="background-image: url('${e.target.result}')"></div>
                 <button class="remove-attachment" data-filename="${file.name}" aria-label="Remove attachment"><i class="bi bi-x"></i></button>
             `;
-            // attach click handler for remove button
             const btn = item.querySelector('.remove-attachment');
             if (btn) btn.addEventListener('click', function(ev){ ev.stopPropagation(); removeAttachment(this.dataset.filename); });
         };
@@ -3108,17 +3044,27 @@ function removeAttachment(filename) {
 async function sendTypingIndicator() {
     if (!currentParticipantId || isTyping || !conversationIds.length) return;
     isTyping = true;
-    try {
-        await fetch(`/chats/api/send-typing/${conversationIds[0]}/`, {
-            method: 'POST',
-            headers: { 'X-CSRFToken': getCSRFToken() }
-        });
-    } catch (e) {}
+    if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN) {
+        chatSocket.send(JSON.stringify({
+            type: 'typing.start',
+            conversation_id: conversationIds[0]
+        }));
+    } else {
+        try {
+            await fetch(`/chats/api/send-typing/${conversationIds[0]}/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCSRFToken() }
+            });
+        } catch (e) {}
+    }
     setTimeout(() => { isTyping = false; }, 3000);
 }
 
 async function checkTyping() {
     if (!currentParticipantId || !conversationIds.length) return;
+    if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN) {
+        return;
+    }
     try {
         const data = await fetchJSON(`/chats/api/check-typing/${conversationIds[0]}/`);
         const wasTyping = otherIsTyping;
@@ -3370,11 +3316,11 @@ function initEmojiPicker() {
     const emojiCategories = {
         'smileys': ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳'],
         'people': ['👋','🤚','🖐','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏'],
-        'nature': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄'],
-        'food': ['🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🥑','🍆','🥔','🥕','🌽','🌶','🫑','🥒','🥬','🥦'],
-        'activities': ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🏑','🥍','🏏','🪃','🥅','⛳','🪁','🏹','🎣','🤿','🥊','🥋'],
-        'objects': ['💎','🔪','🏺','🗿','🪔','🧭','🧱','💡','🔦','🏮','🪔','🧱','💎','📱','💻','⌨️','🖥','🖨','🖱','🖲','🧮','📸','📹','🎥','📽','🎞'],
-        'symbols': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉','☸️']
+        'nature': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐙','🐵','🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🐣','🐥','🐺','🐗','🐴','🦄'],
+        'food': ['🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌽','🫑','🥕','🥔','🍠','🥐','🥯'],
+        'activities': ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🏑','🥍','🏏','🪃','🥅','⛳','🏹','🎣','🤿','🥊','🥋','🎽','🛹'],
+        'objects': ['💎','🔪','🏺','🗿','🪔','🧭','🧱','💡','🔦','🏮','🪔','💎','📱','💻','⌨️','🖥','🖨','🖱','🖲','🧮','📸','📹','🎥','📽','🎞','📞'],
+        'symbols': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉','☸️','✡️','🔯','🕎']
     };
     for (const [cat, emojis] of Object.entries(emojiCategories)) {
         emojiHtml += `<div class="emoji-category"><div class="emoji-category-title">${cat}</div><div class="emoji-grid">`;
@@ -3420,16 +3366,16 @@ window.showAttachmentViewer = (attachment) => {
         m.attachments.forEach(att => {
             if (isImageAttachment(att)) {
                 const url = att.url || att.file_url;
-                galleryImages.push({ url: url, name: att.name || att.filename || ('image_' + (att.id || Math.random()).toString()), raw: att });
+                if (url) {
+                    galleryImages.push({ url: url, name: att.name || att.filename || ('image_' + (att.id || Math.random()).toString()), raw: att });
+                }
             }
         });
     });
 
-    // If the passed attachment is part of the gallery, set index accordingly
     const matchUrl = attachment.url || attachment.file_url;
     galleryIndex = galleryImages.findIndex(g => g.url === matchUrl);
     if (galleryIndex === -1) {
-        // fallback: single image view
         galleryImages = [{ url: matchUrl, name: attachment.name || attachment.filename || 'Attachment', raw: attachment }];
         galleryIndex = 0;
     }
@@ -3440,7 +3386,6 @@ window.showAttachmentViewer = (attachment) => {
         title.innerText = item.name || `Attachment ${i+1} of ${galleryImages.length}`;
         downloadLink.href = item.url;
         content.innerHTML = `<img src="${item.url}" style="max-width:100%;max-height:70vh;">`;
-        // update aria/state on nav buttons
         const prev = document.getElementById('prevAttachment');
         const next = document.getElementById('nextAttachment');
         if (prev) prev.disabled = (i <= 0);
@@ -3459,7 +3404,6 @@ window.showAttachmentViewer = (attachment) => {
         }
     }
 
-    // wire up buttons
     const prevBtn = document.getElementById('prevAttachment');
     const nextBtn = document.getElementById('nextAttachment');
     if (prevBtn) prevBtn.onclick = () => { if (galleryIndex > 0) { galleryIndex--; showImageAt(galleryIndex); } };
@@ -3468,15 +3412,11 @@ window.showAttachmentViewer = (attachment) => {
     const downloadAllBtn = document.getElementById('downloadAllAttachments');
     if (downloadAllBtn) downloadAllBtn.onclick = (ev) => {
         ev.preventDefault();
-        // Prefer server-side zip download when viewing a conversation
         if (window.currentParticipantId) {
             const url = `/chats/api/download-conversation-images/${window.currentParticipantId}/`;
-            // open in new tab to trigger browser download
             window.open(url, '_blank');
             return;
         }
-
-        // Fallback: individual downloads (client-side)
         (async () => {
             if (!galleryImages.length) return;
             downloadAllBtn.disabled = true;
@@ -3500,10 +3440,8 @@ window.showAttachmentViewer = (attachment) => {
         })();
     };
 
-    // open modal and show current
     modal.classList.add('active');
     showImageAt(galleryIndex);
-    // attach keyboard navigation (store handler so it can be removed on close)
     window._attachmentViewerKeyHandler = onKey;
     window.addEventListener('keydown', window._attachmentViewerKeyHandler);
 };
@@ -3516,6 +3454,206 @@ function showAttachmentViewerInline(el) {
         window.showAttachmentViewer(obj);
     } catch (e) {
         console.error('showAttachmentViewerInline error', e);
+    }
+}
+
+// ========== WEBSOCKET HANDLING ==========
+function initWebSocket() {
+    if (!window.currentUserId) {
+        setTimeout(initWebSocket, 1000);
+        return;
+    }
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat/`;
+    chatSocket = new WebSocket(wsUrl);
+
+    chatSocket.onopen = function() {
+        console.log('WebSocket connected');
+        wsReconnectAttempts = 0;
+        wsConnectionActive = true;
+        if (messagePollInterval) clearInterval(messagePollInterval);
+        if (typingPollInterval) clearInterval(typingPollInterval);
+        if (conversationListPollInterval) clearInterval(conversationListPollInterval);
+        conversationListPollInterval = setInterval(loadGroupedConversations, 30000);
+        loadGroupedConversations();
+    };
+
+    chatSocket.onclose = function() {
+        console.log('WebSocket disconnected');
+        wsConnectionActive = false;
+        if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            wsReconnectAttempts++;
+            setTimeout(initWebSocket, WS_RECONNECT_DELAY);
+        } else {
+            if (!messagePollInterval && currentParticipantId) {
+                messagePollInterval = setInterval(() => {
+                    if (currentParticipantId) fetchUnifiedMessages(currentParticipantId);
+                }, 3000);
+            }
+            if (!typingPollInterval && currentParticipantId) {
+                typingPollInterval = setInterval(checkTyping, 2000);
+            }
+            if (conversationListPollInterval) clearInterval(conversationListPollInterval);
+            conversationListPollInterval = setInterval(loadGroupedConversations, 5000);
+            showToast('Real-time connection lost. Using fallback mode.', 'warning');
+            loadGroupedConversations();
+        }
+    };
+
+    chatSocket.onerror = function(error) {
+        console.error('WebSocket error:', error);
+    };
+
+    chatSocket.onmessage = function(e) {
+        try {
+            if (!e.data) return;
+            const data = JSON.parse(e.data);
+            handleWebSocketMessage(data);
+        } catch (err) {
+            console.warn('WebSocket message parse failed', err);
+        }
+    };
+}
+
+function handleWebSocketMessage(data) {
+    switch (data.type) {
+        case 'new_message':
+            handleNewMessage(data.message);
+            break;
+        case 'presence':
+            handlePresence(data);
+            break;
+        case 'typing':
+            handleTypingIndicator(data);
+            break;
+        case 'messages_read':
+            handleReadReceipt(data);
+            break;
+        case 'message_update':
+            handleMessageUpdate(data);
+            break;
+        default:
+            console.log('Unknown WebSocket message type:', data.type);
+    }
+}
+
+function handleNewMessage(message) {
+    if (message.sender_id === window.currentUserId) return;
+
+    if (currentParticipantId && message.sender_id === currentParticipantId) {
+        if (!allMessages.some(m => m.id === message.id)) {
+            allMessages.push(message);
+            lastMessageId = Math.max(lastMessageId, message.id);
+            renderMessages();
+            if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN) {
+                chatSocket.send(JSON.stringify({
+                    type: 'mark_read',
+                    conversation_id: message.conversation_id,
+                    message_ids: [message.id]
+                }));
+            }
+            updateParticipantUnreadInSidebar(currentParticipantId, 0);
+        }
+    } else {
+        const sidebarItem = document.querySelector(`.conversation-item[data-participant-id="${message.sender_id}"]`);
+        if (sidebarItem) {
+            let unreadSpan = sidebarItem.querySelector('.conversation-unread');
+            let currentCount = unreadSpan ? parseInt(unreadSpan.innerText) : 0;
+            currentCount++;
+            if (unreadSpan) {
+                unreadSpan.innerText = currentCount;
+            } else {
+                const preview = sidebarItem.querySelector('.conversation-preview');
+                const badge = document.createElement('span');
+                badge.className = 'conversation-unread';
+                badge.innerText = currentCount;
+                preview.appendChild(badge);
+            }
+        } else {
+            loadGroupedConversations();
+        }
+        updateTotalUnreadCount();
+    }
+    loadGroupedConversations();
+}
+
+function handlePresence(data) {
+    const userId = parseInt(data.user_id);
+    const online = !!data.online;
+    const lastSeen = data.last_seen || null;
+    const userName = data.user_name || null;
+    updateUserPresence(userId, online, lastSeen, userName);
+}
+
+function updateUserPresence(userId, online, lastSeen, userName) {
+    try {
+        const convEl = document.querySelector(`.conversation-item[data-participant-id="${userId}"]`);
+        if (convEl) {
+            const dot = convEl.querySelector('.online-status');
+            if (dot) dot.classList.toggle('online', online);
+        }
+
+        let found = false;
+        for (let u of onlineUsersList) {
+            if (u.id === userId) {
+                found = true;
+                u.is_online = online;
+                u.last_seen = lastSeen || u.last_seen;
+                if (userName) u.name = userName;
+                break;
+            }
+        }
+        if (!found && online) {
+            onlineUsersList.unshift({ id: userId, name: userName || 'User', avatar: '/static/images/default_profile_pic.svg', is_online: true, last_seen: null });
+        }
+        renderOnlineUsers();
+
+        if (currentParticipantId === userId) {
+            currentParticipantIsOnline = online;
+            currentParticipantLastSeen = lastSeen || null;
+            updateParticipantStatus();
+            const infoStatus = document.getElementById('infoParticipantStatus');
+            if (infoStatus) {
+                infoStatus.innerText = online ? 'Online' : (lastSeen ? formatHeaderTime(lastSeen, false) : 'Offline');
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to update presence UI', e);
+    }
+}
+
+function handleTypingIndicator(data) {
+    if (data.conversation_id && conversationIds.includes(data.conversation_id)) {
+        otherIsTyping = data.typing;
+        if (data.typing) otherTypingName = data.user_name || currentParticipantName;
+        renderMessages();
+        updateHeaderTypingStatus();
+    }
+}
+
+function handleReadReceipt(data) {
+    if (data.conversation_id && conversationIds.includes(data.conversation_id)) {
+        let updated = false;
+        allMessages.forEach(msg => {
+            if (data.message_ids.includes(msg.id) && !msg.is_read) {
+                msg.is_read = true;
+                updated = true;
+            }
+        });
+        if (updated) renderMessages();
+    }
+}
+
+function handleMessageUpdate(data) {
+    if (data.conversation_id && conversationIds.includes(data.conversation_id)) {
+        const msg = allMessages.find(m => m.id === data.message_id);
+        if (!msg) return;
+        switch (data.action) {
+            case 'edit': msg.content = data.data.content; break;
+            case 'delete': allMessages = allMessages.filter(m => m.id !== data.message_id); break;
+            case 'pin': msg.is_pinned = data.data.is_pinned; break;
+        }
+        renderMessages();
     }
 }
 
@@ -3758,8 +3896,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // No injected close button — rely on existing modal close elements.
-
     const scrollBottomBtn = document.getElementById('scrollBottomBtn');
     if (scrollBottomBtn) {
         scrollBottomBtn.addEventListener('click', () => scrollToBottom());
@@ -3785,293 +3921,10 @@ document.addEventListener('DOMContentLoaded', () => {
             picker.classList.remove('active');
         }
     });
-});
 
-function showAttachmentViewer(att) { window.showAttachmentViewer(att); }
-// ========== WEBSOCKET INTEGRATION (FIXED) ==========
-// Store references to original functions to avoid breaking existing behavior
-const _originalSendTypingIndicator = sendTypingIndicator;
-const _originalCheckTyping = checkTyping;
-const _originalStartPolling = startPolling;
-const _originalStopPolling = stopPolling;
-const _originalFetchUnifiedMessages = fetchUnifiedMessages;
-
-let chatSocket = null;
-let wsReconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const WS_RECONNECT_DELAY = 3000;
-let wsConnectionActive = false;
-
-function initWebSocket() {
-    if (!window.currentUserId) {
-        console.warn('WebSocket: currentUserId not set, retrying in 1s');
-        setTimeout(initWebSocket, 1000);
-        return;
-    }
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat/`;
-    chatSocket = new WebSocket(wsUrl);
-
-    chatSocket.onopen = function() {
-        console.log('WebSocket connected');
-        wsReconnectAttempts = 0;
-        wsConnectionActive = true;
-        // Stop polling for messages and typing; rely on WebSocket
-        if (messagePollInterval) clearInterval(messagePollInterval);
-        if (typingPollInterval) clearInterval(typingPollInterval);
-        // Reduce conversation list polling frequency (fallback)
-        if (conversationListPollInterval) clearInterval(conversationListPollInterval);
-        conversationListPollInterval = setInterval(loadGroupedConversations, 30000); // 30 sec
-        // Immediately load conversations to ensure list is visible
-        loadGroupedConversations();
-    };
-
-    chatSocket.onclose = function() {
-        console.log('WebSocket disconnected');
-        wsConnectionActive = false;
-        if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            wsReconnectAttempts++;
-            setTimeout(initWebSocket, WS_RECONNECT_DELAY);
-        } else {
-            // Fallback to polling
-            if (!messagePollInterval && currentParticipantId) {
-                messagePollInterval = setInterval(() => {
-                    if (currentParticipantId) fetchUnifiedMessages(currentParticipantId);
-                }, 3000);
-            }
-            if (!typingPollInterval && currentParticipantId) {
-                typingPollInterval = setInterval(checkTyping, 2000);
-            }
-            if (conversationListPollInterval) clearInterval(conversationListPollInterval);
-            conversationListPollInterval = setInterval(loadGroupedConversations, 5000);
-            showToast('Real-time connection lost. Using fallback mode.', 'warning');
-            // Load conversations now
-            loadGroupedConversations();
-        }
-    };
-
-    chatSocket.onerror = function(error) {
-        console.error('WebSocket error:', error);
-    };
-
-    chatSocket.onmessage = function(e) {
-        try {
-            if (!e.data) return;
-            const data = JSON.parse(e.data);
-            handleWebSocketMessage(data);
-        } catch (err) {
-            console.warn('WebSocket message parse failed', err, e && e.data);
-        }
-    };
-}
-
-function handleWebSocketMessage(data) {
-    switch (data.type) {
-        case 'new_message':
-            handleNewMessage(data.message);
-            break;
-        case 'presence':
-            handlePresence(data);
-            break;
-        case 'typing':
-            handleTypingIndicator(data);
-            break;
-        case 'messages_read':
-            handleReadReceipt(data);
-            break;
-        case 'message_update':
-            handleMessageUpdate(data);
-            break;
-        default:
-            console.log('Unknown WebSocket message type:', data.type);
-    }
-}
-
-function handlePresence(data) {
-    const userId = parseInt(data.user_id);
-    const online = !!data.online;
-    const lastSeen = data.last_seen || null;
-    const userName = data.user_name || null;
-    updateUserPresence(userId, online, lastSeen, userName);
-}
-
-function updateUserPresence(userId, online, lastSeen, userName) {
-    // Update conversation list dots
-    try {
-        const convEl = document.querySelector(`.conversation-item[data-participant-id="${userId}"]`);
-        if (convEl) {
-            const dot = convEl.querySelector('.online-status');
-            if (dot) dot.classList.toggle('online', online);
-        }
-
-        // Update online users panel data
-        let found = false;
-        for (let u of onlineUsersList) {
-            if (u.id === userId) {
-                found = true;
-                u.is_online = online;
-                u.last_seen = lastSeen || u.last_seen;
-                if (userName) u.name = userName;
-                break;
-            }
-        }
-        // If we don't have the user in list and they are online, add a lightweight entry
-        if (!found && online) {
-            onlineUsersList.unshift({ id: userId, name: userName || 'User', avatar: '/static/images/default_profile_pic.svg', is_online: true, last_seen: null });
-        }
-        renderOnlineUsers();
-
-        // Update modal info if open for this participant
-        if (currentParticipantId === userId) {
-            currentParticipantIsOnline = online;
-            currentParticipantLastSeen = lastSeen || null;
-            updateParticipantStatus();
-            const infoStatus = document.getElementById('infoParticipantStatus');
-            if (infoStatus) {
-                infoStatus.innerText = online ? 'Online' : (lastSeen ? formatHeaderTime(lastSeen, false) : 'Offline');
-            }
-        }
-    } catch (e) {
-        console.warn('Failed to update presence UI', e);
-    }
-}
-
-function handleNewMessage(message) {
-    if (message.sender_id === window.currentUserId) return; // ignore own messages
-
-    if (currentParticipantId && message.sender_id === currentParticipantId) {
-        if (!allMessages.some(m => m.id === message.id)) {
-            allMessages.push(message);
-            lastMessageId = Math.max(lastMessageId, message.id);
-            renderMessages();
-            if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN) {
-                chatSocket.send(JSON.stringify({
-                    type: 'mark_read',
-                    conversation_id: message.conversation_id,
-                    message_ids: [message.id]
-                }));
-            }
-            updateParticipantUnreadInSidebar(currentParticipantId, 0);
-        }
-    } else {
-        const sidebarItem = document.querySelector(`.conversation-item[data-participant-id="${message.sender_id}"]`);
-        if (sidebarItem) {
-            let unreadSpan = sidebarItem.querySelector('.conversation-unread');
-            let currentCount = unreadSpan ? parseInt(unreadSpan.innerText) : 0;
-            currentCount++;
-            if (unreadSpan) {
-                unreadSpan.innerText = currentCount;
-            } else {
-                const preview = sidebarItem.querySelector('.conversation-preview');
-                const badge = document.createElement('span');
-                badge.className = 'conversation-unread';
-                badge.innerText = currentCount;
-                preview.appendChild(badge);
-            }
-        } else {
-            loadGroupedConversations(); // refresh if conversation not yet in list
-        }
-        updateTotalUnreadCount();
-    }
-    loadGroupedConversations(); // keep list up to date
-}
-
-function handleTypingIndicator(data) {
-    if (data.conversation_id && conversationIds.includes(data.conversation_id)) {
-        otherIsTyping = data.typing;
-        if (data.typing) otherTypingName = data.user_name || currentParticipantName;
-        renderMessages();
-        updateHeaderTypingStatus();
-    }
-}
-
-function handleReadReceipt(data) {
-    if (data.conversation_id && conversationIds.includes(data.conversation_id)) {
-        let updated = false;
-        allMessages.forEach(msg => {
-            if (data.message_ids.includes(msg.id) && !msg.is_read) {
-                msg.is_read = true;
-                updated = true;
-            }
-        });
-        if (updated) renderMessages();
-    }
-}
-
-function handleMessageUpdate(data) {
-    if (data.conversation_id && conversationIds.includes(data.conversation_id)) {
-        const msg = allMessages.find(m => m.id === data.message_id);
-        if (!msg) return;
-        switch (data.action) {
-            case 'edit': msg.content = data.data.content; break;
-            case 'delete': allMessages = allMessages.filter(m => m.id !== data.message_id); break;
-            case 'pin': msg.is_pinned = data.data.is_pinned; break;
-        }
-        renderMessages();
-    }
-}
-
-// ===== Override functions with WebSocket awareness =====
-sendTypingIndicator = async function() {
-    if (!currentParticipantId || isTyping || !conversationIds.length) return;
-    isTyping = true;
-    if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN) {
-        chatSocket.send(JSON.stringify({
-            type: 'typing.start',
-            conversation_id: conversationIds[0]
-        }));
-    } else {
-        await _originalSendTypingIndicator();
-    }
-    setTimeout(() => { isTyping = false; }, 3000);
-};
-
-checkTyping = async function() {
-    if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN) {
-        // typing events are pushed, no need to poll
-        return;
-    } else {
-        await _originalCheckTyping();
-    }
-};
-
-startPolling = function() {
-    _originalStopPolling(); // clear any existing intervals
-    if (wsConnectionActive) {
-        statusPollInterval = setInterval(pollReadStatus, 5000);
-        conversationListPollInterval = setInterval(loadGroupedConversations, 30000);
-        // message and typing polling are disabled
-    } else {
-        _originalStartPolling();
-    }
-};
-
-stopPolling = function() {
-    _originalStopPolling(); // already clears everything
-};
-
-fetchUnifiedMessages = async function(participantId) {
-    await _originalFetchUnifiedMessages(participantId);
-    if (wsConnectionActive && chatSocket?.readyState === WebSocket.OPEN && conversationIds.length) {
-        const unreadIds = allMessages
-            .filter(m => !m.is_read && m.sender_id !== window.currentUserId)
-            .map(m => m.id);
-        if (unreadIds.length) {
-            chatSocket.send(JSON.stringify({
-                type: 'mark_read',
-                conversation_id: conversationIds[0],
-                message_ids: unreadIds
-            }));
-        }
-    }
-};
-
-// ===== Ensure conversation list loads after WebSocket init =====
-document.addEventListener('DOMContentLoaded', function() {
-    // Wait a moment for the original DOMContentLoaded to finish
+    // Initialize WebSocket after a short delay
     setTimeout(() => {
         initWebSocket();
-        // If after 2 seconds the conversation list is still empty, force a refresh
         setTimeout(() => {
             const container = document.getElementById('conversationsList');
             if (container && container.children.length === 0) {
@@ -4085,6 +3938,17 @@ document.addEventListener('DOMContentLoaded', function() {
 window.addEventListener('beforeunload', function() {
     if (chatSocket) chatSocket.close();
 });
+
+// Export functions needed globally
+window.showAttachmentViewer = window.showAttachmentViewer;
+window.startChatWithUser = startChatWithUser;
+window.retryMessage = retryMessage;
+window.replyToMessage = replyToMessage;
+window.editMessage = editMessage;
+window.pinMessage = pinMessage;
+window.deleteSingleMessage = deleteSingleMessage;
+window.showAttachmentViewerInline = showAttachmentViewerInline;
+
 </script>
 
 {% endblock %}
