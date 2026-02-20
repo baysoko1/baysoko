@@ -13,6 +13,34 @@
         --success: #06D6A0;
         --success-dark: #05b487;
     }
+    /* Modal blur styling inspired by password reset design (no raining animation) */
+    .modal-backdrop.show {
+        background-color: rgba(0,0,0,0.35) !important;
+        backdrop-filter: blur(5px);
+    }
+
+    .modal.fade .modal-dialog {
+        transform: translateY(10px);
+        transition: transform 0.25s ease;
+    }
+
+    .modal.show .modal-dialog {
+        transform: translateY(0);
+    }
+
+    .modal .modal-content {
+        background: rgba(255,255,255,0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(0,0,0,0.06);
+        box-shadow: 0 8px 30px rgba(16,24,40,0.12);
+        border-radius: 12px;
+    }
+
+    [data-theme="dark"] .modal .modal-content {
+        background: rgba(18,18,18,0.75);
+        color: #f4f4f5;
+        border: 1px solid rgba(255,255,255,0.04);
+    }
     
     .container-custom {
         max-width: 1600px;
@@ -2079,6 +2107,19 @@ window.handleFavoriteClick = function(button, listingId) {
                                 </script>
                                 {% endwith %}
                                 {% endif %}
+
+                                {% if user.is_authenticated and listing.seller == user %}
+                                <div class="owner-actions d-flex align-items-center gap-2">
+                                    <button type="button" class="action-button action-edit btn-edit-listing" data-listing-id="{{ listing.id }}" data-listing-price="{{ listing.price }}" data-listing-stock="{{ listing.stock }}" data-listing-title="{{ listing.title|escapejs }}">
+                                        <i class="bi bi-pencil"></i>
+                                        Edit
+                                    </button>
+                                    <button type="button" class="action-button action-delete btn-delete-listing" data-listing-id="{{ listing.id }}">
+                                        <i class="bi bi-trash"></i>
+                                        Delete
+                                    </button>
+                                </div>
+                                {% endif %}
                                 
                                 <!-- Like Button -->
                                 {% if user.is_authenticated %}
@@ -2943,6 +2984,18 @@ function updateListingsGrid(data) {
                                     style="${hasFavorites ? 'display: flex; opacity: 1; visibility: visible;' : 'display: none; opacity: 0; visibility: hidden;'}">
                                     ${totalFavorites}
                                 </span>
+                            </div>
+                            ` : ''}
+                            ${isSeller ? `
+                            <div class="owner-actions d-flex align-items-center gap-2">
+                                <button type="button" class="action-button action-edit btn-edit-listing" data-listing-id="${listing.id}" data-listing-price="${listing.price}" data-listing-stock="${listing.stock}" data-listing-title="${(listing.title||'').replace(/"/g,'&quot;')}">
+                                    <i class="bi bi-pencil"></i>
+                                    Edit
+                                </button>
+                                <button type="button" class="action-button action-delete btn-delete-listing" data-listing-id="${listing.id}">
+                                    <i class="bi bi-trash"></i>
+                                    Delete
+                                </button>
                             </div>
                             ` : ''}
                         </div>

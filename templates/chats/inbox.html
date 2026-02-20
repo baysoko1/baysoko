@@ -18,6 +18,17 @@
         --info: #118AB2;
     }
 
+    /* Attachment preview styles (blurred loader, central X) */
+    #attachmentsPreview { display:flex; gap:10px; flex-wrap:wrap; }
+    .preview-item { position:relative; width:120px; height:120px; overflow:hidden; border-radius:10px; }
+    .preview-item .attachment-image { width:100%; height:100%; background-size:cover; background-position:center; display:flex; align-items:center; justify-content:center; }
+    .preview-item .attachment-image.loading { filter: blur(8px) saturate(0.9); position:relative; }
+    .preview-item .attachment-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+    .preview-item .attachment-overlay .spinner-border { width:36px; height:36px; border-width:3px; }
+    .preview-item .remove-attachment { pointer-events:auto; position:absolute; top:6px; right:6px; background:rgba(0,0,0,0.45); border:none; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+    .preview-item .remove-attachment i { font-size:1rem; }
+    .preview-item .file-icon { display:flex; align-items:center; justify-content:center; width:100%; height:100%; background:var(--bg-secondary); }
+
     /* Hide global navigation elements in chat view */
     body.chat-active .main-nav,
     body.chat-active .bottom-nav,
@@ -745,6 +756,11 @@
         cursor: pointer;
         transition: transform 0.3s ease;
     }
+
+    .attachment-item .attachment-preview { position: relative; }
+    .attachment-item .attachment-preview img.loading { filter: blur(8px) saturate(0.9); }
+    .attachment-item .attachment-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+    .attachment-item .attachment-overlay .spinner-border { width: 36px; height: 36px; border-width: 3px; }
 
     .attachment-preview img:hover {
         transform: scale(1.02);
@@ -1989,6 +2005,7 @@
     </div>
 </div>
 
+
 <script>
 // ========== GLOBAL VARIABLES ==========
 let currentParticipantId = null;
@@ -2011,6 +2028,33 @@ let otherTypingName = '';
 let tempIdCounter = 0;
 let galleryImages = [];
 let galleryIndex = 0;
+// Map tempFileId -> objectURL for optimistic previews
+const tempFileMap = new Map();
+
+function createTempFilesForTempMessage(tempId, files) {
+    const attachmentsMeta = [];
+    files.forEach((file, idx) => {
+        try {
+            const tempFileId = `${tempId}_${idx}`;
+            const objectUrl = URL.createObjectURL(file);
+            tempFileMap.set(tempFileId, objectUrl);
+            attachmentsMeta.push({ name: file.name, type: file.type, size: file.size, tempFileId });
+        } catch (err) {
+            console.warn('createTempFilesForTempMessage error', err);
+            attachmentsMeta.push({ name: file.name, type: file.type, size: file.size });
+        }
+    });
+    return attachmentsMeta;
+}
+
+function revokeTempFiles(tempId) {
+    for (const key of Array.from(tempFileMap.keys())) {
+        if (key.startsWith(tempId + '_')) {
+            try { URL.revokeObjectURL(tempFileMap.get(key)); } catch (e) {}
+            tempFileMap.delete(key);
+        }
+    }
+}
 
 function isImageAttachment(att) {
     return att && (att.type && att.type.startsWith('image/')) || (att.url && /\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i.test(att.url || ''));
@@ -2713,8 +2757,43 @@ function renderMessageBubble(msg) {
             const fileName = att.name || att.filename || 'Attachment';
             const encoded = encodeURIComponent(JSON.stringify(att));
             if (att.type && att.type.startsWith('image/')) {
+                // Resolve image source. Prefer server URL (check multiple possible property names),
+                // then fall back to temporary object URLs created for optimistic messages.
+                const resolvedFileUrl = att.url || att.file_url || att.file || att.path || fileUrl || null;
+                let imgSrc = resolvedFileUrl || null;
+                let loadingOverlay = '';
+                try {
+                    if (!imgSrc && msg.tempId) {
+                        // Prefer explicit tempFileId attached to the attachment metadata
+                        if (att.tempFileId && tempFileMap.has(att.tempFileId)) {
+                            imgSrc = tempFileMap.get(att.tempFileId);
+                        } else if (msg.files && msg.files.length) {
+                            // Fallback: try to match by filename or use the first image file
+                            const localFile = msg.files.find(f => f.name === fileName) || msg.files.find(f => f.type && f.type.startsWith('image/'));
+                            if (localFile) {
+                                try {
+                                    const fallbackId = `${msg.tempId}_fallback_${Math.random().toString(36).slice(2,9)}`;
+                                    const objectUrl = URL.createObjectURL(localFile);
+                                    tempFileMap.set(fallbackId, objectUrl);
+                                    imgSrc = objectUrl;
+                                } catch (err) {
+                                    console.warn('createObjectURL fallback error', err);
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { console.warn('local preview error', e); }
+
+                // Show spinner/overlay only when we truly don't have any preview yet
+                if (!imgSrc && !msg.tempId) {
+                    loadingOverlay = `<div class="attachment-overlay"><div class="spinner-border text-light" role="status" aria-hidden="true"></div></div>`;
+                }
+
+                const imgClass = (imgSrc && typeof imgSrc === 'string' && imgSrc.startsWith && imgSrc.startsWith('blob:') && msg.tempId) ? '' : (!imgSrc ? 'loading' : '');
+
                 attachmentsHtml += `<div class="attachment-item" data-attachment="${encoded}" onclick="showAttachmentViewerInline(this)">
-                    <div class="attachment-preview"><img src="${fileUrl}" alt="${escapeHtml(fileName)}"></div>
+                    <div class="attachment-preview">${imgSrc ? `<img src="${imgSrc}" alt="${escapeHtml(fileName)}" class="${imgClass}">` : `<img src="" alt="${escapeHtml(fileName)}">`}</div>
+                    ${loadingOverlay}
                     <div class="attachment-info">${escapeHtml(fileName)}</div>
                 </div>`;
             } else {
@@ -2805,13 +2884,15 @@ async function sendMessage() {
     if (sendBtn) sendBtn.disabled = true;
 
     const tempId = 'temp_' + Date.now() + '_' + (tempIdCounter++);
+    // create temp file entries and objectURLs for optimistic preview
+    const attachmentsMeta = createTempFilesForTempMessage(tempId, attachments);
     const tempMessage = {
         tempId: tempId,
         content: content,
         timestamp: new Date().toISOString(),
         sender_id: window.currentUserId,
         is_own: true,
-        attachments: attachments.map(f => ({ name: f.name, type: f.type, size: f.size })),
+        attachments: attachmentsMeta,
         status: 'sending',
         delivered: false,
         is_read: false,
@@ -2820,10 +2901,70 @@ async function sendMessage() {
     temporaryMessages.set(tempId, tempMessage);
     renderMessages();
 
+    // Optionally pre-upload images to Cloudinary when available and running in production (DEBUG=false)
     const formData = new FormData();
     formData.append('participant_id', currentParticipantId);
     formData.append('content', content);
-    attachments.forEach(file => formData.append('attachment', file));
+
+    const useCloudinary = (typeof window.CLOUDINARY_UPLOAD_URL !== 'undefined' && typeof window.CLOUDINARY_UPLOAD_PRESET !== 'undefined' && (typeof window.DEBUG !== 'undefined' ? !window.DEBUG : false));
+    let uploaded = [];
+    if (useCloudinary) {
+        // Upload image files to Cloudinary in parallel, collect URLs
+        const imageFiles = attachments.filter(f => f.type && f.type.startsWith('image/'));
+        try {
+            uploaded = await Promise.all(imageFiles.map(file => {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('upload_preset', window.CLOUDINARY_UPLOAD_PRESET);
+                return fetch(window.CLOUDINARY_UPLOAD_URL, { method: 'POST', body: fd }).then(r => r.json());
+            }));
+            const urls = uploaded.filter(r => r && r.secure_url).map(r => r.secure_url);
+            urls.forEach(u => formData.append('remote_attachments', u));
+
+            // Remove loading state for images that finished uploading (optimistic UI)
+            uploaded.forEach((res, idx) => {
+                try {
+                    const file = imageFiles[idx];
+                    if (file && res && res.secure_url) {
+                        const selector = `.attachment-image[data-filename="${file.name}"]`;
+                        const el = document.querySelector(selector);
+                        if (el) {
+                            el.classList.remove('loading');
+                            const overlay = el.querySelector('.attachment-overlay');
+                            if (overlay) overlay.style.display = 'none';
+                        }
+                    }
+                } catch (e) {}
+            });
+        } catch (e) {
+            console.warn('Cloudinary upload failed, falling back to direct upload', e);
+            uploaded = [];
+        }
+    }
+
+    // Append non-image files always
+    const otherFiles = attachments.filter(f => !(f.type && f.type.startsWith('image/')));
+    otherFiles.forEach(f => formData.append('attachment', f));
+
+    // If using Cloudinary, only append original image files that failed to upload
+    if (useCloudinary) {
+        const imageFiles = attachments.filter(f => f.type && f.type.startsWith('image/'));
+        if (uploaded && uploaded.length === imageFiles.length) {
+            imageFiles.forEach((file, idx) => {
+                const res = uploaded[idx];
+                if (!(res && res.secure_url)) {
+                    formData.append('attachment', file);
+                }
+            });
+        } else {
+            // Upload did not run or partially failed — append all image files as fallback
+            imageFiles.forEach(f => formData.append('attachment', f));
+        }
+    } else {
+        // Not using Cloudinary — append all attachments (images already appended above as otherFiles excluded images)
+        // (no-op because non-image files appended and images were skipped when useCloudinary===false)
+        if (!useCloudinary) attachments.forEach(file => formData.append('attachment', file));
+    }
     if (replyingTo) formData.append('reply_to_id', replyingTo);
 
     try {
@@ -2834,6 +2975,8 @@ async function sendMessage() {
         });
         const data = await response.json();
         if (data.success) {
+            // server accepted message — revoke any temp object URLs for this temp message
+            try { revokeTempFiles(tempId); } catch (e) {}
             temporaryMessages.delete(tempId);
             const newMsg = data.message;
             if (!allMessages.some(m => m.id === newMsg.id)) {
@@ -2929,13 +3072,23 @@ function createAttachmentPreview(file) {
     item.className = 'preview-item';
     if (file.type.startsWith('image/')) {
         const reader = new FileReader();
+        // Show a clear preview in the preview area (no blur/spinner). The chat
+        // message bubble will display a blurred loader for temporary messages.
         reader.onload = (e) => {
-            item.innerHTML = `<img src="${e.target.result}" alt=""><button class="remove-attachment" data-filename="${file.name}"><i class="bi bi-x"></i></button>`;
+            item.innerHTML = `
+                <div class="attachment-image" data-filename="${file.name}" style="background-image: url('${e.target.result}')"></div>
+                <button class="remove-attachment" data-filename="${file.name}" aria-label="Remove attachment"><i class="bi bi-x"></i></button>
+            `;
+            // attach click handler for remove button
+            const btn = item.querySelector('.remove-attachment');
+            if (btn) btn.addEventListener('click', function(ev){ ev.stopPropagation(); removeAttachment(this.dataset.filename); });
         };
         reader.readAsDataURL(file);
     } else {
         item.innerHTML = `<div class="file-icon"><i class="bi ${getFileIcon(file.name)}"></i></div>
             <button class="remove-attachment" data-filename="${file.name}"><i class="bi bi-x"></i></button>`;
+        const btn = item.querySelector('.remove-attachment');
+        if (btn) btn.addEventListener('click', function(ev){ ev.stopPropagation(); removeAttachment(this.dataset.filename); });
     }
     preview.appendChild(item);
 }
@@ -2988,15 +3141,17 @@ function replyToMessage(msgId) {
     const msg = allMessages.find(m => m.id === msgId) || 
                 Array.from(temporaryMessages.values()).find(m => m.id === msgId || m.tempId === msgId);
     if (msg) {
-        const preview = document.getElementById('replyContent');
+        const senderName = (msg.sender_id === window.currentUserId) ? 'You' : (msg.sender_name || currentParticipantName || 'User');
+        const snippet = msg.content ? (msg.content.length > 60 ? msg.content.substring(0,60) + '…' : msg.content) : '[Attachment]';
         const bar = document.getElementById('replyPreviewBar');
-        const senderName = msg.sender_id === window.currentUserId ? 'You' : (msg.sender_name || currentParticipantName);
-        const snippet = msg.content ? (msg.content.length > 60 ? msg.content.substring(0,60)+'…' : msg.content) : '[Attachment]';
-        if (preview) preview.innerText = `Replying to ${senderName}: ${snippet}`;
-        if (bar) bar.style.display = 'flex';
+        const replyContentEl = document.getElementById('replyContent');
+        if (bar && replyContentEl) {
+            replyContentEl.innerText = `${senderName}: ${snippet}`;
+            bar.style.display = 'flex';
+        }
+        const input = document.getElementById('messageInput');
+        if (input) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
     }
-    const input = document.getElementById('messageInput');
-
 }
 
 function hideReplyPreview() {
@@ -3366,7 +3521,7 @@ function showAttachmentViewerInline(el) {
 
 // ========== INITIALIZATION ==========
 document.addEventListener('DOMContentLoaded', () => {
-    window.currentUserId = {{ request.user.id|safe }};
+    window.currentUserId = {{ request.user.id|default:"null" }};
 
     loadOnlineUsers();
     loadGroupedConversations();
@@ -3700,8 +3855,13 @@ function initWebSocket() {
     };
 
     chatSocket.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-        handleWebSocketMessage(data);
+        try {
+            if (!e.data) return;
+            const data = JSON.parse(e.data);
+            handleWebSocketMessage(data);
+        } catch (err) {
+            console.warn('WebSocket message parse failed', err, e && e.data);
+        }
     };
 }
 
@@ -3926,4 +4086,5 @@ window.addEventListener('beforeunload', function() {
     if (chatSocket) chatSocket.close();
 });
 </script>
+
 {% endblock %}

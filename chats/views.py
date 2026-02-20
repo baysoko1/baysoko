@@ -1,6 +1,8 @@
 import json
 import uuid
 import logging
+import mimetypes
+import urllib.request
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -407,26 +409,81 @@ def send_unified_message(request):
             reply_to_id=reply_to_id if reply_to_id else None,
         )
 
-        # handle attachments
+        # handle attachments (files and remote URLs)
         attachments_data = []
+        saved_paths = []
+        # Save uploaded files
         if request.FILES:
             for key, file in request.FILES.items():
                 ext = file.name.split('.')[-1] if '.' in file.name else 'bin'
-                filename = f"attachments/{uuid.uuid4()}.{ext}"
+                filename = f"chat_attachments/{uuid.uuid4()}.{ext}"
                 saved_path = default_storage.save(filename, ContentFile(file.read()))
                 file_url = default_storage.url(saved_path)
                 attachments_data.append({
-                    'id': None,  # will be set after saving if you have an Attachment model
+                    'saved_path': saved_path,
+                    'id': None,
                     'name': file.name,
                     'url': file_url,
-                    'type': file.content_type,
-                    'size': file.size,
+                    'type': getattr(file, 'content_type', '') or mimetypes.guess_type(file.name)[0] or '',
+                    'size': getattr(file, 'size', None),
                 })
-            # If you have an Attachment model, save them here and link to message
-            # For now we store in a JSON field – you'll need to add a field to Message
-            # message.attachments_json = attachments_data
-            # If you don't have an attachment model, you can skip storing; just return for UI.
+                saved_paths.append(saved_path)
+
+        # Handle remote attachments (e.g., Cloudinary secure URLs passed by client)
+        remote_urls = []
+        try:
+            # If JSON body contained remote_attachments
+            if isinstance(data, dict) and data.get('remote_attachments'):
+                remote_urls = data.get('remote_attachments') or []
+            # If sent via form-data multiple remote_attachments fields
+            elif request.POST:
+                remote_urls = request.POST.getlist('remote_attachments') or []
+        except Exception:
+            remote_urls = []
+
+        for rurl in remote_urls:
+            try:
+                resp = urllib.request.urlopen(rurl)
+                content = resp.read()
+                ctype = resp.headers.get_content_type() if hasattr(resp, 'headers') else mimetypes.guess_type(rurl)[0] or ''
+                ext = mimetypes.guess_extension(ctype) or ''
+                filename = f"chat_attachments/{uuid.uuid4()}{ext}"
+                saved_path = default_storage.save(filename, ContentFile(content))
+                file_url = default_storage.url(saved_path)
+                attachments_data.append({
+                    'saved_path': saved_path,
+                    'id': None,
+                    'name': rurl.split('/')[-1].split('?')[0] or rurl,
+                    'url': file_url,
+                    'type': ctype,
+                    'size': len(content),
+                })
+                saved_paths.append(saved_path)
+            except Exception as e:
+                logger.exception(f"Failed to fetch remote attachment {rurl}: {e}")
+
         message.save()
+        # Persist attachments into MessageAttachment model (if any)
+        created_attachments = []
+        try:
+            for att in attachments_data:
+                if att.get('saved_path'):
+                    ma = MessageAttachment(message=message)
+                    # set file name directly to saved storage path so FileField references it
+                    ma.file.name = att['saved_path']
+                    ma.filename = att.get('name') or ''
+                    ma.content_type = att.get('type') or ''
+                    ma.size = att.get('size') or None
+                    ma.save()
+                    created_attachments.append({
+                        'id': ma.id,
+                        'name': ma.filename,
+                        'url': default_storage.url(ma.file.name),
+                        'type': ma.content_type,
+                        'size': ma.size,
+                    })
+        except Exception:
+            logger.exception('Failed to create MessageAttachment records')
         conversation.updated_at = timezone.now()
         conversation.save(update_fields=['updated_at'])
 
@@ -435,22 +492,30 @@ def send_unified_message(request):
 
         update_user_online_status(request.user)
 
-        return JsonResponse({
-            'success': True,
-            'message_id': message.id,
-            'conversation_id': conversation.id,
-            'message': {
+        # Broadcast new message to conversation participants via Channels
+        try:
+            message_payload = {
                 'id': message.id,
+                'conversation_id': conversation.id,
                 'content': message.content,
                 'timestamp': message.timestamp.isoformat(),
                 'sender_id': request.user.id,
                 'sender_name': request.user.get_full_name() or request.user.username,
                 'sender_avatar': get_avatar_url_for(request.user, request),
-                'attachments': attachments_data,
-                'is_own': True,
+                'attachments': created_attachments or attachments_data,
+                'is_own': False,
                 'is_read': False,
                 'reply_to_id': message.reply_to_id,
             }
+            broadcast_to_conversation_participants(conversation, 'chat_message', {'message': message_payload})
+        except Exception:
+            logger.exception('Failed to broadcast message via WebSocket')
+
+        return JsonResponse({
+            'success': True,
+            'message_id': message.id,
+            'conversation_id': conversation.id,
+            'message': message_payload
         })
     except Exception as e:
         logger.error(f"send_unified_message error: {e}")
@@ -787,25 +852,72 @@ class SendUnifiedMessageView(LoginRequiredMixin, View):
             logger.exception('Failed to broadcast conversation-level unread counts')
 
         attachments_data = []
+        # Save uploaded files (if any)
         for f in files:
-            ext = f.name.split('.')[-1] if '.' in f.name else 'bin'
-            filename = f'chat_attachments/{user.id}/{uuid.uuid4()}.{ext}'
-            saved_path = default_storage.save(filename, ContentFile(f.read()))
-            file_url = default_storage.url(saved_path)
-            att = MessageAttachment.objects.create(
-                message=message,
-                file=saved_path,
-                filename=f.name,
-                content_type=f.content_type,
-                size=f.size,
-            )
-            attachments_data.append({
-                'id': att.id,
-                'url': request.build_absolute_uri(file_url),
-                'name': att.filename,
-                'type': att.content_type,
-                'size': att.size,
-            })
+            try:
+                ext = f.name.split('.')[-1] if '.' in f.name else 'bin'
+                filename = f'chat_attachments/{user.id}/{uuid.uuid4()}.{ext}'
+                saved_path = default_storage.save(filename, ContentFile(f.read()))
+                file_url = default_storage.url(saved_path)
+                att = MessageAttachment.objects.create(
+                    message=message,
+                    file=saved_path,
+                    filename=f.name,
+                    content_type=getattr(f, 'content_type', ''),
+                    size=getattr(f, 'size', None),
+                )
+                attachments_data.append({
+                    'id': att.id,
+                    'url': request.build_absolute_uri(file_url),
+                    'name': att.filename,
+                    'type': att.content_type,
+                    'size': att.size,
+                })
+            except Exception:
+                logger.exception('Failed to save uploaded attachment')
+
+        # Handle remote attachments (e.g., Cloudinary URLs) sent as 'remote_attachments'
+        remote_urls = []
+        try:
+            # JSON payload case
+            if request.content_type == 'application/json':
+                data = json.loads(request.body or '{}')
+                remote_urls = data.get('remote_attachments', []) or []
+            else:
+                # form-data case: may be multiple remote_attachments entries
+                remote_urls = request.POST.getlist('remote_attachments') or []
+        except Exception:
+            remote_urls = []
+
+        if remote_urls:
+            import urllib.request
+            for url in remote_urls:
+                try:
+                    resp = urllib.request.urlopen(url)
+                    content = resp.read()
+                    # derive filename from URL
+                    parsed = url.split('?')[0].rstrip('/')
+                    name = parsed.split('/')[-1] or f'{uuid.uuid4()}.bin'
+                    ext = name.split('.')[-1] if '.' in name else 'bin'
+                    save_name = f'chat_attachments/{user.id}/{uuid.uuid4()}.{ext}'
+                    saved_path = default_storage.save(save_name, ContentFile(content))
+                    file_url = default_storage.url(saved_path)
+                    att = MessageAttachment.objects.create(
+                        message=message,
+                        file=saved_path,
+                        filename=name,
+                        content_type=resp.headers.get_content_type() if hasattr(resp, 'headers') else '',
+                        size=len(content),
+                    )
+                    attachments_data.append({
+                        'id': att.id,
+                        'url': request.build_absolute_uri(file_url),
+                        'name': att.filename,
+                        'type': att.content_type,
+                        'size': att.size,
+                    })
+                except Exception:
+                    logger.exception('Failed to fetch and save remote attachment: %s', url)
 
         conversation.messages.filter(~Q(sender=user), delivered=False).update(delivered=True)
         conversation.updated_at = timezone.now()

@@ -17,6 +17,7 @@ handler500 = views.custom_error_500
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('listings.urls')),
+    path('listings/', include('listings.urls')),
     path('', include('users.urls')),
     path('chats/', include('chats.urls')),
     path('reviews/', include('reviews.urls')),
@@ -29,6 +30,8 @@ urlpatterns = [
     
     # Social authentication
     path('admin/webhook-config/', admin_views.configure_webhooks, name='admin_configure_webhooks'),
+    # Client-side error logging endpoint (used to capture JS parse/runtime errors)
+    path('__client_error_log__/', views.client_error_log, name='client_error_log'),
 ]
 
 # Add webhook endpoints for delivery system

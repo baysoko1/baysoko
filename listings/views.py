@@ -1477,6 +1477,38 @@ def get_cart_items(request):
 
 
 @login_required
+def cart_summary(request):
+    """Return a lightweight cart summary used by the frontend.
+
+    JSON structure expected by the client:
+    {
+        'cart_total': <float>,
+        'cart_item_count': <int>,
+        'item_totals': { '<item_id>': { 'item_total': <float>, 'quantity': <int>, 'stock': <int> }, ... }
+    }
+    """
+    try:
+        cart, _ = Cart.objects.get_or_create(user=request.user)
+        item_totals = {}
+        for ci in cart.items.all():
+            item_totals[str(ci.id)] = {
+                'item_total': float(ci.get_total_price()),
+                'quantity': ci.quantity,
+                'stock': ci.listing.stock if ci.listing and hasattr(ci.listing, 'stock') else 999
+            }
+
+        data = {
+            'cart_total': float(cart.get_total_price()),
+            'cart_item_count': cart.items.count(),
+            'item_totals': item_totals,
+        }
+        return JsonResponse(data)
+    except Exception as e:
+        logger.exception('Failed to build cart summary')
+        return JsonResponse({'error': 'Failed to build cart summary'}, status=500)
+
+
+@login_required
 @require_POST
 def toggle_favorite(request, listing_id):
     from .models import Favorite, Listing

@@ -1012,25 +1012,62 @@
     
     // Initialize cart summary on page load using server-provided state if available
     (function initCartSummary() {
-        try {
-            const itemTotals = {};
-            document.querySelectorAll('.cart-item').forEach(item => {
-                const id = item.dataset.itemId;
-                const quantity = parseInt(item.querySelector('.quantity-input')?.value || 1);
-                const itemTotal = calculateItemTotal(id);
-                itemTotals[id] = { item_total: itemTotal.toFixed(2), quantity: quantity, stock: parseInt(item.querySelector('.quantity-input')?.max || 999) };
-            });
+        // Try WebSocket first for live summary, fallback to window.cartState or AJAX
+        const itemTotals = {};
+        document.querySelectorAll('.cart-item').forEach(item => {
+            const id = item.dataset.itemId;
+            const quantity = parseInt(item.querySelector('.quantity-input')?.value || 1);
+            const itemTotal = calculateItemTotal(id);
+            itemTotals[id] = { item_total: itemTotal.toFixed(2), quantity: quantity, stock: parseInt(item.querySelector('.quantity-input')?.max || 999) };
+        });
 
-            if (window.cartState && (typeof window.cartState.total !== 'undefined')) {
-                updateCartSummary({ cart_total: parseFloat(window.cartState.total || 0), cart_item_count: parseInt(window.cartState.itemCount || 0), item_totals: itemTotals });
-            } else {
-                // Fallback: recalculate from DOM
-                const subtotal = recalculateCartTotals();
-                updateCartSummary({ cart_total: subtotal, cart_item_count: document.querySelectorAll('.cart-item').length, item_totals: itemTotals });
+        function applySummary(data) {
+            if (!data) return;
+            updateCartSummary({ cart_total: parseFloat(data.cart_total || data.total || 0), cart_item_count: parseInt(data.cart_item_count || data.item_count || 0), item_totals: data.item_totals || itemTotals });
+        }
+
+        // Attempt WebSocket (non-blocking). Server may or may not support it; this is a best-effort enhancement.
+        try {
+            const userId = window.currentUserId || 0;
+            if (userId) {
+                const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+                const wsUrl = `${proto}://${location.host}/ws/cart/${userId}/`;
+                const cartSocket = new WebSocket(wsUrl);
+
+                const wsTimeout = setTimeout(() => { cartSocket.close(); }, 5000);
+
+                cartSocket.addEventListener('open', () => {
+                    clearTimeout(wsTimeout);
+                    try { cartSocket.send(JSON.stringify({ action: 'get_summary' })); } catch (e) {}
+                });
+
+                cartSocket.addEventListener('message', (evt) => {
+                    try {
+                        const msg = JSON.parse(evt.data);
+                        if (msg.type === 'cart_summary' || msg.type === 'summary') {
+                            applySummary(msg.payload || msg);
+                        }
+                    } catch (e) {}
+                });
+
+                cartSocket.addEventListener('close', () => { /* silent */ });
             }
         } catch (e) {
-            console.warn('Failed to initialize cart summary:', e);
-            recalculateCartTotals();
+            console.warn('Cart WebSocket unavailable', e);
+        }
+
+        // If server didn't provide window.cartState, fetch immediately as fallback
+        if (window.cartState && (typeof window.cartState.total !== 'undefined')) {
+            applySummary({ cart_total: parseFloat(window.cartState.total || 0), cart_item_count: parseInt(window.cartState.itemCount || 0), item_totals: itemTotals });
+        } else {
+            // Fetch summary endpoint as reliable fallback
+            safeFetch('/cart/summary/', { method: 'GET' }).then(data => {
+                applySummary(data);
+            }).catch(err => {
+                // Final fallback: recalc from DOM
+                const subtotal = recalculateCartTotals();
+                applySummary({ cart_total: subtotal, cart_item_count: document.querySelectorAll('.cart-item').length, item_totals: itemTotals });
+            });
         }
     })();
     

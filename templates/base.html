@@ -3506,5 +3506,45 @@
             });
         </script>
         {% endif %}
+    <script>
+        (function(){
+            if (!window.currentUserId) return;
+            try {
+                var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+                var wsUrl = proto + '://' + location.host + '/ws/cart/' + window.currentUserId + '/';
+                var socket = new WebSocket(wsUrl);
+
+                socket.addEventListener('open', function() {
+                    try { socket.send(JSON.stringify({ action: 'get_summary' })); } catch(e){}
+                });
+
+                socket.addEventListener('message', function(ev) {
+                    try {
+                        var data = JSON.parse(ev.data || '{}');
+                        if (data && data.type === 'cart_summary' && data.payload) {
+                            var p = data.payload;
+                            var itemCount = (p.cart_item_count != null) ? p.cart_item_count : (p.cartItemCount || 0);
+                            var total = (p.cart_total != null) ? p.cart_total : (p.cartTotal || 0);
+                            // Dispatch events so existing listeners update UI
+                            document.dispatchEvent(new CustomEvent('cartUpdated', { detail: { itemCount: itemCount, total: total, payload: p } }));
+                            document.dispatchEvent(new CustomEvent('globalCartUpdated', { detail: { itemCount: itemCount, total: total } }));
+                        }
+                    } catch (e) {}
+                });
+
+                socket.addEventListener('close', function() {
+                    // try an AJAX fallback once after close
+                    setTimeout(function() {
+                        fetch('/cart/summary/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function(r){ if(!r.ok) return; return r.json(); }).then(function(data){ if(data){ document.dispatchEvent(new CustomEvent('cartUpdated',{ detail: { itemCount: data.cart_item_count||0, total: data.cart_total||0, payload: data } })); } }).catch(function(){});
+                    }, 500);
+                });
+
+                socket.addEventListener('error', function(){ try{ socket.close(); }catch(e){} });
+            } catch (e) {
+                // fallback to AJAX if WS construction fails
+                try { fetch('/cart/summary/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function(r){ if(!r.ok) return; return r.json(); }).then(function(data){ if(data){ document.dispatchEvent(new CustomEvent('cartUpdated',{ detail: { itemCount: data.cart_item_count||0, total: data.cart_total||0, payload: data } })); } }).catch(function(){}); } catch (ee) {}
+            }
+        })();
+    </script>
 </body>
 </html>

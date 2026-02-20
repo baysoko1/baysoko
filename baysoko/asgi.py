@@ -13,6 +13,7 @@ import delivery.routing
 import storefront.routing
 import chats.routing
 import notifications.routing
+import listings.routing
 from users.consumers import AuthConsumer
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
@@ -24,6 +25,7 @@ websocket_urlpatterns = (
     + storefront.routing.websocket_urlpatterns
     + notifications.routing.websocket_urlpatterns
     + chats.routing.websocket_urlpatterns
+    + listings.routing.websocket_urlpatterns
     + [path("ws/auth/", AuthConsumer.as_asgi())]
 )
 

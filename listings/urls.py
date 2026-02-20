@@ -28,6 +28,7 @@ urlpatterns = [
     path('cart/clear/', views.clear_cart, name='clear_cart'),
     path('api/cart/clear/', views.clear_cart, name='clear-cart'),
     path('cart/get-cart-items/', views.get_cart_items, name='get_cart_items'),
+    path('cart/summary/', views.cart_summary, name='cart_summary'),
     path('listings/json/', views.all_listings_json, name='all_listings_json'),
     path('checkout/', views.checkout, name='checkout'),
     path('order/<int:order_id>/payment/', views.process_payment, name='process_payment'),
