@@ -2,1412 +2,588 @@
 {% load crispy_forms_tags %}
 {% load static %}
 
-{% block title %}{% if creating_store %}Create New Store{% else %}Edit {{ store.name }}{% endif %} - Baysoko{% endblock %}
+{% block title %}{% if creating_store %}Create New Store{% else %}Edit {{ store.name }}{% endif %} – Baysoko{% endblock %}
 
 {% block extra_css %}
 <style>
-    /* Modern Form Hero */
+    /* ===== ULTRA‑COMPACT STYLES ===== */
+    :root {
+        --form-max-width: 1200px;
+    }
+
     .form-hero {
-        background: 
-            linear-gradient(rgba(7, 59, 76, 0.92), rgba(7, 59, 76, 0.95)),
-            url('https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=1950&q=80');
-        background-size: cover;
-        background-position: center;
+        background: linear-gradient(135deg, #073B4C 0%, #118AB2 100%);
         color: white;
-        padding: var(--spacing-xl) 0;
+        padding: 0.75rem 0;
         text-align: center;
-        position: relative;
-        overflow: hidden;
     }
-
-    .form-hero::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: 
-            radial-gradient(circle at 30% 20%, rgba(6, 214, 160, 0.3) 0%, transparent 50%),
-            radial-gradient(circle at 70% 80%, rgba(255, 107, 53, 0.3) 0%, transparent 50%);
-        animation: pulse 20s infinite alternate;
-    }
-
-    @keyframes pulse {
-        0% { opacity: 0.3; }
-        100% { opacity: 0.7; }
-    }
-
     .form-hero-content {
-        position: relative;
-        z-index: 2;
         max-width: 800px;
         margin: 0 auto;
-        padding: 0 var(--spacing-md);
+        padding: 0 0.5rem;
     }
-
+    .form-hero .badge {
+        background: rgba(255,255,255,0.15);
+        border-radius: 50px;
+        padding: 0.2rem 0.8rem;
+        font-size: 0.8rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        margin-bottom: 0.2rem;
+    }
     .form-title-main {
-        font-size: 2.5rem;
+        font-size: 1.6rem;
         font-weight: 800;
-        margin-bottom: var(--spacing-sm);
-        background: linear-gradient(135deg, #FFFFFF, #06D6A0);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        animation: slideInUp 0.6s ease-out;
+        margin-bottom: 0.1rem;
     }
-
     .form-subtitle-main {
-        font-size: 1.1rem;
+        font-size: 0.9rem;
         opacity: 0.9;
-        margin-bottom: 0;
-        line-height: 1.6;
-        animation: slideInUp 0.8s ease-out;
-    }
-
-    /* Modern Form Container */
-    .form-wrapper {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: var(--spacing-xl) var(--spacing-md);
+        margin: 0;
     }
 
     .form-container {
+        max-width: var(--form-max-width);
+        margin: 0.5rem auto 1rem;
+        padding: 0 0.5rem;
         display: grid;
-        grid-template-columns: 1fr 350px;
-        gap: var(--spacing-xl);
-        animation: fadeIn 0.6s ease-out;
+        grid-template-columns: 1fr 280px;
+        gap: 0.75rem;
     }
 
     /* Main Form Card */
     .main-form-card {
         background: var(--card-bg);
-        border-radius: var(--radius-xl);
-        padding: var(--spacing-xl);
-        box-shadow: var(--shadow-lg);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        box-shadow: var(--shadow-sm);
         border: 1px solid var(--border-color);
-        animation: slideInLeft 0.6s ease-out;
     }
-
-    .form-header-modern {
+    .form-header {
         display: flex;
         align-items: center;
-        gap: var(--spacing-md);
-        margin-bottom: var(--spacing-xl);
-        padding-bottom: var(--spacing-lg);
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.25rem;
         border-bottom: 1px solid var(--border-color);
     }
-
-    .form-icon {
-        width: 60px;
-        height: 60px;
-        border-radius: var(--radius-lg);
-        background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+    .form-header-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+        background: linear-gradient(135deg, var(--primary), var(--accent));
         display: flex;
         align-items: center;
         justify-content: center;
         color: white;
-        font-size: 1.5rem;
-    }
-
-    .form-header-text h2 {
-        font-size: 1.8rem;
-        font-weight: 800;
-        margin-bottom: var(--spacing-xs);
-        color: var(--text-primary);
-    }
-
-    .form-header-text p {
-        color: var(--text-secondary);
-        margin: 0;
         font-size: 1rem;
     }
-
-    /* Form Sections */
-    .form-section-modern {
-        margin-bottom: var(--spacing-xl);
-        padding: var(--spacing-lg);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-color);
-        transition: var(--transition);
-    }
-
-    .form-section-modern:hover {
-        border-color: var(--primary);
-        box-shadow: var(--shadow-md);
-    }
-
-    .section-title-modern {
-        font-size: 1.3rem;
+    .form-header-text h2 {
+        font-size: 1.2rem;
         font-weight: 700;
-        margin-bottom: var(--spacing-md);
-        color: var(--text-primary);
+        margin: 0;
+    }
+    .form-header-text p {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        margin: 0;
+    }
+
+    /* Section Cards */
+    .form-section-card {
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        margin-bottom: 0.75rem;
+        border: 1px solid var(--border-color);
+    }
+    .section-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
         display: flex;
         align-items: center;
-        gap: var(--spacing-sm);
+        gap: 0.3rem;
+    }
+    .section-title i {
+        color: var(--accent);
     }
 
-    .section-title-modern i {
-        color: var(--primary);
-    }
-
-    /* Featured Store Section */
-    .featured-section {
-        background: linear-gradient(135deg, rgba(255, 193, 7, 0.1), rgba(255, 193, 7, 0.05));
-        border: 1px solid rgba(255, 193, 7, 0.3);
-    }
-
-    .featured-section:hover {
-        border-color: var(--warning);
-    }
-
-    .featured-badge {
-        background: linear-gradient(135deg, var(--warning), #ff9800);
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin-left: auto;
-    }
-
-    .featured-disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    .featured-disabled .form-check-input {
-        cursor: not-allowed;
-    }
-
-    .premium-required {
-        background: linear-gradient(135deg, rgba(255, 107, 53, 0.1), rgba(255, 107, 53, 0.05));
-        border: 1px solid rgba(255, 107, 53, 0.3);
-    }
-
-    /* Form Grid */
-    .form-grid-modern {
+    .form-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: var(--spacing-md);
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 0.5rem;
+    }
+    .form-group {
+        margin-bottom: 0;
+    }
+    .form-label {
+        font-weight: 600;
+        font-size: 0.8rem;
+        margin-bottom: 0.1rem;
+    }
+    .required-field::after {
+        content: ' *';
+        color: var(--danger);
     }
 
-    /* File Upload Styles */
-    .file-upload-container {
-        position: relative;
-        border: 3px dashed var(--border-color);
-        border-radius: var(--radius-lg);
-        padding: var(--spacing-lg);
-        text-align: center;
-        transition: var(--transition);
-        cursor: pointer;
+    .form-control, .form-select {
+        width: 100%;
+        padding: 0.4rem 0.6rem;
+        border: 2px solid var(--border-color);
+        border-radius: 0.4rem;
         background: var(--bg-primary);
+        font-size: 0.85rem;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .form-control:focus, .form-select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(6, 214, 160, 0.1);
+    }
+    textarea.form-control {
+        min-height: 60px;
     }
 
-    .file-upload-container:hover,
-    .file-upload-container.drag-over {
-        border-color: var(--primary);
-        background: rgba(255, 107, 53, 0.05);
+    /* Upload card */
+    .upload-card {
+        background: var(--bg-primary);
+        border: 2px dashed var(--border-color);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        text-align: center;
+        cursor: pointer;
+        margin-bottom: 0.5rem;
     }
-
-    .upload-icon-large {
-        font-size: 2.5rem;
-        color: var(--primary);
-        margin-bottom: var(--spacing-md);
-        opacity: 0.7;
+    .upload-card:hover {
+        border-color: var(--accent);
     }
-
+    .upload-icon {
+        font-size: 1.8rem;
+        color: var(--accent);
+        margin-bottom: 0.1rem;
+    }
     .upload-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        margin-bottom: var(--spacing-sm);
-        color: var(--text-primary);
-    }
-
-    .upload-subtitle {
-        color: var(--text-secondary);
-        margin-bottom: var(--spacing-md);
         font-size: 0.9rem;
+        font-weight: 700;
     }
-
-    .upload-btn-modern {
-        background: var(--primary);
+    .upload-subtitle {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+    .upload-btn {
+        background: var(--accent);
         color: white;
         border: none;
-        border-radius: var(--radius-md);
-        padding: var(--spacing-sm) var(--spacing-lg);
+        border-radius: 30px;
+        padding: 0.3rem 1rem;
+        font-size: 0.8rem;
         font-weight: 600;
-        cursor: pointer;
-        transition: var(--transition);
         display: inline-flex;
         align-items: center;
-        gap: var(--spacing-sm);
-        font-size: 0.95rem;
+        gap: 0.2rem;
+        margin-top: 0.2rem;
     }
 
-    .upload-btn-modern:hover {
-        background: var(--primary-dark);
-        transform: translateY(-2px);
-        box-shadow: var(--shadow-md);
-    }
-
-    /* Image Previews */
+    /* Image previews */
     .image-previews-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-        gap: var(--spacing-sm);
-        margin-top: var(--spacing-md);
+        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+        gap: 0.25rem;
+        margin-top: 0.5rem;
     }
-
     .preview-item-modern {
         position: relative;
-        border-radius: var(--radius-md);
+        border-radius: 6px;
         overflow: hidden;
-        border: 2px solid var(--border-color);
         aspect-ratio: 1;
-        transition: var(--transition);
+        border: 2px solid var(--border-color);
     }
-
-    .preview-item-modern:hover {
-        border-color: var(--primary);
-        transform: translateY(-2px);
-    }
-
     .preview-img-modern {
         width: 100%;
         height: 100%;
         object-fit: cover;
     }
-
-    .preview-overlay-modern {
+    .preview-badge {
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.7);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0;
-        transition: var(--transition);
+        top: 2px;
+        left: 2px;
+        background: var(--accent);
+        color: white;
+        font-size: 0.5rem;
+        padding: 1px 4px;
+        border-radius: 8px;
     }
 
-    .preview-item-modern:hover .preview-overlay-modern {
-        opacity: 1;
+    /* Featured section */
+    .featured-section {
+        border-left: 4px solid var(--warning);
+    }
+    .premium-required {
+        border-left: 4px solid var(--danger);
+    }
+    .featured-benefits {
+        background: var(--bg-primary);
+        border-radius: 4px;
+        padding: 0.5rem;
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
     }
 
-    /* Tips Sidebar */
+    /* Tips sidebar */
     .tips-sidebar {
         position: sticky;
-        top: 100px;
-        animation: slideInRight 0.6s ease-out;
+        top: 10px;
     }
-
     .tips-card {
         background: var(--card-bg);
-        border-radius: var(--radius-xl);
-        padding: var(--spacing-xl);
-        box-shadow: var(--shadow-lg);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        box-shadow: var(--shadow-sm);
         border: 1px solid var(--border-color);
-        margin-bottom: var(--spacing-lg);
+        margin-bottom: 0.75rem;
     }
-
     .tips-header {
         display: flex;
         align-items: center;
-        gap: var(--spacing-sm);
-        margin-bottom: var(--spacing-lg);
-        padding-bottom: var(--spacing-md);
+        gap: 0.3rem;
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.25rem;
         border-bottom: 1px solid var(--border-color);
     }
-
     .tips-header i {
-        color: var(--primary);
-        font-size: 1.3rem;
+        color: var(--accent);
+        font-size: 1rem;
     }
-
     .tips-header h3 {
-        font-size: 1.3rem;
-        font-weight: 700;
-        margin: 0;
-        color: var(--text-primary);
-    }
-
-    .tip-item-modern {
-        padding: var(--spacing-md);
-        margin-bottom: var(--spacing-md);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-lg);
-        border-left: 4px solid var(--primary);
-        transition: var(--transition);
-    }
-
-    .tip-item-modern:hover {
-        transform: translateX(5px);
-        box-shadow: var(--shadow-sm);
-    }
-
-    .tip-item-modern:nth-child(2) { border-left-color: var(--accent); }
-    .tip-item-modern:nth-child(3) { border-left-color: var(--info); }
-    .tip-item-modern:nth-child(4) { border-left-color: var(--warning); }
-
-    .tip-title {
         font-size: 1rem;
         font-weight: 700;
-        margin-bottom: var(--spacing-xs);
-        color: var(--text-primary);
-    }
-
-    .tip-description {
-        font-size: 0.9rem;
-        color: var(--text-secondary);
         margin: 0;
-        line-height: 1.5;
+    }
+    .tip-item {
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        border-left: 4px solid var(--accent);
+        font-size: 0.8rem;
     }
 
-    /* Premium CTA */
-    .premium-cta {
-        background: linear-gradient(135deg, var(--warning) 0%, var(--secondary) 100%);
-        color: var(--dark);
-        border-radius: var(--radius-lg);
-        padding: var(--spacing-lg);
-        text-align: center;
-        margin-top: var(--spacing-lg);
-    }
-
-    .premium-cta h4 {
-        font-size: 1.2rem;
-        font-weight: 800;
-        margin-bottom: var(--spacing-sm);
-    }
-
-    .premium-cta p {
-        font-size: 0.9rem;
-        margin-bottom: var(--spacing-md);
-        opacity: 0.9;
-    }
-
-    /* Form Actions */
-    .form-actions-modern {
+    /* Form actions */
+    .form-actions {
         display: flex;
         justify-content: flex-end;
-        gap: var(--spacing-md);
-        margin-top: var(--spacing-xl);
-        padding-top: var(--spacing-lg);
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+        padding-top: 0.5rem;
         border-top: 1px solid var(--border-color);
     }
-
-    /* Featured Benefits */
-    .featured-benefits {
-        background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-        border-radius: var(--radius-md);
-        padding: var(--spacing-md);
-        margin-top: var(--spacing-md);
-    }
-
-    .benefit-item {
-        display: flex;
+    .btn-custom {
+        padding: 0.4rem 1rem;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-flex;
         align-items: center;
-        gap: var(--spacing-sm);
-        margin-bottom: var(--spacing-sm);
-        font-size: 0.9rem;
+        gap: 0.3rem;
+        border: none;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .btn-primary {
+        background: linear-gradient(135deg, var(--accent), #05b386);
+        color: white;
+    }
+    .btn-ghost {
+        background: transparent;
+        color: var(--text-primary);
+        border: 2px solid var(--border-color);
     }
 
-    .benefit-item i {
-        color: var(--success);
-        font-size: 1rem;
-    }
-
-    .text-muted {
-        color: var(--text-secondary) !important;
-    }
-
-    /* Animations */
-    @keyframes slideInUp {
-        from {
-            opacity: 0;
-            transform: translateY(30px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-
-    @keyframes slideInLeft {
-        from {
-            opacity: 0;
-            transform: translateX(-30px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
-    }
-
-    @keyframes slideInRight {
-        from {
-            opacity: 0;
-            transform: translateX(30px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-        }
-        to {
-            opacity: 1;
-        }
-    }
-
-    /* Responsive Design */
-    @media (max-width: 992px) {
+    /* Responsive */
+    @media (max-width: 768px) {
         .form-container {
             grid-template-columns: 1fr;
-            gap: var(--spacing-lg);
         }
-
         .tips-sidebar {
             position: static;
         }
-    }
-
-    @media (max-width: 768px) {
-        .form-hero {
-            padding: var(--spacing-lg) 0;
-        }
-
-        .form-title-main {
-            font-size: 2rem;
-        }
-
-        .form-container {
-            padding: var(--spacing-md);
-        }
-
-        .main-form-card {
-            padding: var(--spacing-lg);
-        }
-
-        .form-grid-modern {
-            grid-template-columns: 1fr;
-        }
-
-        .form-actions-modern {
-            flex-direction: column;
-        }
-
-        .form-actions-modern .btn-custom {
-            width: 100%;
-        }
-    }
-
-    @media (max-width: 480px) {
-        .form-hero {
-            padding: var(--spacing-md) 0;
-        }
-
-        .form-title-main {
-            font-size: 1.8rem;
-        }
-
-        .form-subtitle-main {
-            font-size: 1rem;
-        }
-
-        .main-form-card {
-            padding: var(--spacing-md);
-        }
-
-        .form-header-modern {
-            flex-direction: column;
-            text-align: center;
-            gap: var(--spacing-sm);
-        }
-
-        .tips-card {
-            padding: var(--spacing-lg);
-        }
-    }
-    
-    /* Added: Better image preview handling */
-    .image-preview-container {
-        margin-top: 15px;
-        min-height: 100px;
-    }
-    
-    .no-preview {
-        text-align: center;
-        padding: 20px;
-        color: #6c757d;
-        border: 2px dashed #dee2e6;
-        border-radius: 8px;
-        background: #f8f9fa;
-    }
-    
-    .new-image-preview-item {
-        border: 2px solid #28a745 !important;
-    }
-    
-    .new-image-badge {
-        background: #28a745 !important;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Form Hero Section -->
-<section class="form-hero">
+<div class="form-hero">
     <div class="form-hero-content">
+        <span class="badge">
+            <i class="bi bi-{% if creating_store %}plus-circle{% else %}pencil-square{% endif %}"></i>
+            {% if creating_store %}New Store{% else %}Edit Store{% endif %}
+        </span>
         <h1 class="form-title-main">
-            <i class="bi bi-{% if creating_store %}plus-circle{% else %}pencil-square{% endif %} me-2"></i>
-            {% if creating_store %}
-                Create Your Store
-            {% else %}
-                Edit {{ store.name }}
-            {% endif %}
+            {% if creating_store %}Create Your Store{% else %}Update {{ store.name }}{% endif %}
         </h1>
         <p class="form-subtitle-main">
-            {% if creating_store %}
-                Start your selling journey on Baysoko. Set up your store in minutes and reach thousands of local buyers.
-            {% else %}
-                Update your store information and settings to keep your business thriving.
-            {% endif %}
+            {% if creating_store %}Start selling in minutes.{% else %}Keep your store details fresh.{% endif %}
         </p>
     </div>
-</section>
+</div>
 
-<div class="form-wrapper">
-    <div class="form-container">
-        <!-- Main Form -->
-        <div class="main-form-card">
-            <div class="form-header-modern">
-                <div class="form-icon">
-                    <i class="bi bi-shop"></i>
-                </div>
-                <div class="form-header-text">
-                    <h2>{% if creating_store %}Store Setup{% else %}Store Information{% endif %}</h2>
-                    <p>Fill in your store details to {% if creating_store %}get started{% else %}make updates{% endif %}</p>
-                </div>
+<div class="form-container">
+    <!-- Main Form -->
+    <div class="main-form-card">
+        <div class="form-header">
+            <div class="form-header-icon"><i class="bi bi-shop"></i></div>
+            <div class="form-header-text">
+                <h2>Store Information</h2>
+                <p>Fill in the details below</p>
             </div>
+        </div>
 
-            {% if messages %}
-            <div class="mb-4">
-                {% for message in messages %}
-                <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
-                    <div class="d-flex align-items-center gap-2">
-                        <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' %}exclamation-circle{% else %}info-circle{% endif %}"></i>
-                        <span>{{ message }}</span>
-                    </div>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-                {% endfor %}
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show py-1 small" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close btn-sm" data-bs-dismiss="alert"></button>
             </div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post" enctype="multipart/form-data" id="storeForm" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger py-1 mb-2 small">{{ form.non_field_errors }}</div>
             {% endif %}
 
-            <form method="post" enctype="multipart/form-data" id="storeForm">
-                {% csrf_token %}
-                
-                {% if form.non_field_errors %}
-                <div class="alert alert-danger mb-4">
-                    <i class="bi bi-exclamation-circle me-2"></i>
-                    {{ form.non_field_errors }}
-                </div>
-                {% endif %}
-
-                <!-- Store Name & Slug -->
-                <div class="form-section-modern">
-                    <h3 class="section-title-modern">
-                        <i class="bi bi-tag"></i>
-                        Basic Information
-                    </h3>
-                    <div class="form-grid-modern">
-                        <div class="form-group">
-                            <label class="form-label fw-bold" for="{{ form.name.id_for_label }}">
-                                Store Name *
-                            </label>
-                            {{ form.name|as_crispy_field }}
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label fw-bold" for="{{ form.slug.id_for_label }}">
-                                Store URL *
-                            </label>
-                            {{ form.slug|as_crispy_field }}
-                            <small class="form-text text-muted">This will be your store's web address</small>
-                        </div>
+            <!-- Basic Information -->
+            <div class="form-section-card">
+                <h3 class="section-title"><i class="bi bi-tag"></i> Basic</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="{{ form.name.id_for_label }}" class="form-label required-field">Name</label>
+                        {{ form.name|as_crispy_field }}
                     </div>
-                    
-                    <div class="form-group mt-3">
-                        <label class="form-label fw-bold" for="{{ form.description.id_for_label }}">
-                            Store Description *
-                        </label>
-                        {{ form.description|as_crispy_field }}
+                    <div class="form-group">
+                        <label for="{{ form.slug.id_for_label }}" class="form-label required-field">URL</label>
+                        {{ form.slug|as_crispy_field }}
                     </div>
                 </div>
-
-                <!-- Store Branding -->
-                <div class="form-section-modern">
-                    <h3 class="section-title-modern">
-                        <i class="bi bi-palette"></i>
-                        Branding & Images
-                    </h3>
-                    
-                    <div class="form-grid-modern">
-                        <!-- Logo Upload -->
-                        <div class="form-group">
-                            <label class="form-label fw-bold d-block mb-3">
-                                Store Logo
-                                <span class="text-muted small">(Optional)</span>
-                            </label>
-                            
-                            <div class="file-upload-container" id="logoUploadArea">
-                                <div class="upload-icon-large">
-                                    <i class="bi bi-cloud-arrow-up"></i>
-                                </div>
-                                <h4 class="upload-title">Upload Logo</h4>
-                                <p class="upload-subtitle">Drag & drop or click to browse</p>
-                                <p class="upload-requirements small text-muted">
-                                    <i class="bi bi-info-circle"></i>
-                                    Recommended: 400×400px, PNG or JPG
-                                </p>
-                                <input type="file" 
-                                       class="d-none" 
-                                       name="logo" 
-                                       id="id_logo" 
-                                       accept="image/jpeg,image/png,image/gif,image/webp">
-                                <button type="button" class="upload-btn-modern" onclick="document.getElementById('id_logo').click()">
-                                    <i class="bi bi-folder2-open"></i> Choose Logo
-                                </button>
-                            </div>
-                            
-                            <!-- Logo preview container - Always present -->
-                            <div class="image-preview-container">
-                                <div class="image-previews-grid" id="logoPreviewContainer">
-                                    {% if not creating_store and store.logo %}
-                                        <!-- Existing logo preview -->
-                                        <div class="preview-item-modern">
-                                            <img src="{{ store.logo.url }}" 
-                                                 alt="{{ store.name }} logo"
-                                                 class="preview-img-modern">
-                                            <div class="preview-overlay-modern">
-                                                <button type="button" 
-                                                        class="btn btn-danger btn-sm"
-                                                        data-bs-toggle="modal" 
-                                                        data-bs-target="#deleteLogoModal">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    {% else %}
-                                        <!-- Placeholder for new store or when no logo -->
-                                        <div class="no-preview" id="logoNoPreview">
-                                            <i class="bi bi-image display-6 text-muted mb-2"></i>
-                                            <p class="mb-0">No logo selected yet</p>
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Cover Image Upload -->
-                        <div class="form-group">
-                            <label class="form-label fw-bold d-block mb-3">
-                                Cover Image
-                                <span class="text-muted small">(Optional)</span>
-                            </label>
-                            
-                            <div class="file-upload-container" id="coverUploadArea">
-                                <div class="upload-icon-large">
-                                    <i class="bi bi-images"></i>
-                                </div>
-                                <h4 class="upload-title">Upload Cover</h4>
-                                <p class="upload-subtitle">Showcase your store</p>
-                                <p class="upload-requirements small text-muted">
-                                    <i class="bi bi-info-circle"></i>
-                                    Recommended: 1200×400px
-                                </p>
-                                <input type="file" 
-                                       class="d-none" 
-                                       name="cover_image" 
-                                       id="id_cover_image" 
-                                       accept="image/jpeg,image/png,image/gif,image/webp">
-                                <button type="button" class="upload-btn-modern" onclick="document.getElementById('id_cover_image').click()">
-                                    <i class="bi bi-folder2-open"></i> Choose Cover
-                                </button>
-                            </div>
-                            
-                            <!-- Cover preview container - Always present -->
-                            <div class="image-preview-container">
-                                <div class="image-previews-grid" id="coverPreviewContainer">
-                                    {% if not creating_store and store.cover_image %}
-                                        <!-- Existing cover preview -->
-                                        <div class="preview-item-modern">
-                                            <img src="{{ store.cover_image.url }}" 
-                                                 alt="{{ store.name }} cover"
-                                                 class="preview-img-modern">
-                                            <div class="preview-overlay-modern">
-                                                <button type="button" 
-                                                        class="btn btn-danger btn-sm"
-                                                        data-bs-toggle="modal" 
-                                                        data-bs-target="#deleteCoverModal">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    {% else %}
-                                        <!-- Placeholder for new store or when no cover -->
-                                        <div class="no-preview" id="coverNoPreview">
-                                            <i class="bi bi-images display-6 text-muted mb-2"></i>
-                                            <p class="mb-0">No cover image selected yet</p>
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="form-group mt-1">
+                    <label for="{{ form.description.id_for_label }}" class="form-label required-field">Description</label>
+                    {{ form.description|as_crispy_field }}
+                    <div class="char-count" id="description-counter">0/2000</div>
                 </div>
+            </div>
 
-                <!-- Featured Store Section -->
-                {% if not creating_store %}
-                    {% if can_be_featured %}
-                        <div class="form-section-modern featured-section">
-                            <div class="d-flex align-items-center justify-content-between mb-3">
-                                <h3 class="section-title-modern m-0">
-                                    <i class="bi bi-star"></i>
-                                    Featured Store
-                                </h3>
-                                {% if is_enterprise %}
-                                <span class="featured-badge">
-                                    <i class="bi bi-award me-1"></i>Enterprise
-                                </span>
-                                {% endif %}
+            <!-- Branding -->
+            <div class="form-section-card">
+                <h3 class="section-title"><i class="bi bi-palette"></i> Branding</h3>
+                <div class="form-grid">
+                    <div>
+                        <label class="form-label">Logo</label>
+                        <div class="upload-card" id="logoUploadArea">
+                            <div class="upload-icon"><i class="bi bi-cloud-arrow-up"></i></div>
+                            <div class="upload-title">Upload Logo</div>
+                            <div class="upload-subtitle">Drag or click</div>
+                            <input type="file" name="logo" id="id_logo" accept="image/*" class="d-none">
+                            <button type="button" class="upload-btn" onclick="document.getElementById('id_logo').click()">
+                                <i class="bi bi-folder2-open"></i> Choose
+                            </button>
+                        </div>
+                        <div class="image-previews-grid" id="logoPreviewContainer">
+                            {% if not creating_store and store.logo %}
+                            <div class="preview-item-modern">
+                                <img src="{{ store.logo.url }}" alt="Logo" class="preview-img-modern">
+                                <span class="preview-badge">Current</span>
                             </div>
-                            
-                            {% if is_enterprise %}
-                                <div class="alert alert-success mb-3">
-                                    <div class="d-flex align-items-center">
-                                        <i class="bi bi-award-fill me-2"></i>
-                                        <div>
-                                            <strong>Enterprise Store</strong>
-                                            <p class="mb-0 small">Your store is automatically featured as an Enterprise subscription holder.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" checked disabled>
-                                    <label class="form-check-label fw-bold">
-                                        Featured Store (Enabled for Enterprise)
-                                    </label>
-                                    <input type="hidden" name="is_featured" value="1">
-                                </div>
                             {% else %}
-                                <!-- Check if the form has is_featured field (it should for non-enterprise premium stores) -->
-                                {% if 'is_featured' in form.fields %}
-                                    <div class="form-check form-switch">
-                                        {{ form.is_featured|as_crispy_field }}
-                                    </div>
-                                {% else %}
-                                    <div class="alert alert-warning">
-                                        <i class="bi bi-exclamation-triangle me-2"></i>
-                                        Featured store option is not available. Please check your subscription status.
-                                    </div>
-                                {% endif %}
+                            <div class="no-preview small text-muted">No logo</div>
                             {% endif %}
-                            
-                            <div class="featured-benefits mt-3">
-                                <h6 class="fw-bold mb-2">Featured Store Benefits:</h6>
-                                <div class="benefit-item">
-                                    <i class="bi bi-check-circle-fill"></i>
-                                    <span>Top placement in store directory</span>
-                                </div>
-                                <div class="benefit-item">
-                                    <i class="bi bi-check-circle-fill"></i>
-                                    <span>Increased visibility to buyers</span>
-                                </div>
-                                <div class="benefit-item">
-                                    <i class="bi bi-check-circle-fill"></i>
-                                    <span>Priority support</span>
-                                </div>
-                                <div class="benefit-item">
-                                    <i class="bi bi-check-circle-fill"></i>
-                                    <span>Featured badge on your store</span>
-                                </div>
-                            </div>
-                            
-                            <small class="text-muted mt-2 d-block">
-                                <i class="bi bi-info-circle me-1"></i>
-                                Featured stores get premium placement and increased visibility.
-                            </small>
                         </div>
+                    </div>
+                    <div>
+                        <label class="form-label">Cover</label>
+                        <div class="upload-card" id="coverUploadArea">
+                            <div class="upload-icon"><i class="bi bi-images"></i></div>
+                            <div class="upload-title">Upload Cover</div>
+                            <div class="upload-subtitle">Drag or click</div>
+                            <input type="file" name="cover_image" id="id_cover_image" accept="image/*" class="d-none">
+                            <button type="button" class="upload-btn" onclick="document.getElementById('id_cover_image').click()">
+                                <i class="bi bi-folder2-open"></i> Choose
+                            </button>
+                        </div>
+                        <div class="image-previews-grid" id="coverPreviewContainer">
+                            {% if not creating_store and store.cover_image %}
+                            <div class="preview-item-modern">
+                                <img src="{{ store.cover_image.url }}" alt="Cover" class="preview-img-modern">
+                                <span class="preview-badge">Current</span>
+                            </div>
+                            {% else %}
+                            <div class="no-preview small text-muted">No cover</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Featured Store (if editing) -->
+            {% if not creating_store %}
+            <div class="form-section-card {% if can_be_featured %}featured-section{% else %}premium-required{% endif %}">
+                <div class="d-flex align-items-center justify-content-between">
+                    <h3 class="section-title m-0"><i class="bi bi-star"></i> Featured</h3>
+                    {% if is_enterprise %}<span class="badge bg-warning">Enterprise</span>{% endif %}
+                </div>
+                {% if can_be_featured %}
+                    {% if is_enterprise %}
+                        <div class="alert alert-success py-1 mt-1 small">Auto‑featured with Enterprise.</div>
+                        <input type="hidden" name="is_featured" value="1">
                     {% else %}
-                        <div class="form-section-modern premium-required">
-                            <h3 class="section-title-modern">
-                                <i class="bi bi-star"></i>
-                                Featured Store
-                            </h3>
-                            
-                            <div class="alert alert-warning">
-                                <div class="d-flex align-items-center">
-                                    <i class="bi bi-lock-fill me-2"></i>
-                                    <div>
-                                        <h6 class="fw-bold mb-1">Premium Feature</h6>
-                                        <p class="mb-2">Upgrade to a premium plan to get your store featured on the platform.</p>
-                                        <a href="{% url 'storefront:subscription_plan_select' slug=store.slug %}" class="btn-custom btn-warning btn-sm">
-                                            <i class="bi bi-lightning-charge me-1"></i>
-                                            Upgrade to Premium
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="featured-benefits mt-3">
-                                <h6 class="fw-bold mb-2">Unlock These Benefits:</h6>
-                                <div class="benefit-item">
-                                    <i class="bi bi-star-fill text-warning"></i>
-                                    <span class="text-muted">Get featured in store directory</span>
-                                </div>
-                                <div class="benefit-item">
-                                    <i class="bi bi-eye-fill text-warning"></i>
-                                    <span class="text-muted">5x more visibility to buyers</span>
-                                </div>
-                                <div class="benefit-item">
-                                    <i class="bi bi-graph-up-arrow text-warning"></i>
-                                    <span class="text-muted">Advanced analytics dashboard</span>
-                                </div>
-                                <div class="benefit-item">
-                                    <i class="bi bi-shield-check text-warning"></i>
-                                    <span class="text-muted">Priority customer support</span>
-                                </div>
-                            </div>
+                        <div class="form-check form-switch mt-1">
+                            {{ form.is_featured|as_crispy_field }}
                         </div>
                     {% endif %}
-                {% endif %}
-                
-
-                <!-- Payout Settings -->
-                {% if not creating_store %}
-                <div class="form-section-modern">
-                    <h3 class="section-title-modern">
-                        <i class="bi bi-wallet2"></i>
-                        Payout Settings
-                    </h3>
-                    <div class="form-grid-modern">
-                        <div class="form-group">
-                            <label class="form-label fw-bold">M-Pesa Payout Phone</label>
-                            {% if store.payout_verified %}
-                                <input type="text" class="form-control" value="{{ store.payout_phone }}" disabled>
-                                <div class="form-text text-success">Verified on {{ store.payout_verified_at|date:'SHORT_DATE_FORMAT' }} — payout phone locked.</div>
-                            {% else %}
-                                <input type="text" class="form-control" id="payoutPhone" name="payout_phone" value="{{ store.payout_phone|default:'' }}">
-                                <div class="form-text">Enter the M-Pesa phone to receive payouts. Verify to lock this number.</div>
-                                <form method="post" action="{% url 'storefront:start_payout_verification' store.slug %}" class="mt-2">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="phone" id="verifyPhoneInput" value="{{ store.payout_phone|default:'' }}">
-                                    <button class="btn btn-outline-primary btn-sm" type="submit" onclick="document.getElementById('verifyPhoneInput').value = document.getElementById('payoutPhone').value;">Verify Phone</button>
-                                </form>
-                            {% endif %}
-                        </div>
+                    <div class="featured-benefits">
+                        <div class="small"><i class="bi bi-check-circle-fill text-success me-1"></i> Top placement</div>
+                        <div class="small"><i class="bi bi-check-circle-fill text-success me-1"></i> More visibility</div>
                     </div>
-                </div>
-                {% endif %}
-
-                <!-- Form Actions -->
-                <div class="form-actions-modern">
-                    <a href="{% url 'storefront:seller_dashboard' %}" class="btn-custom btn-ghost">
-                        <i class="bi bi-arrow-left me-2"></i>
-                        Cancel
-                    </a>
-                    <button type="submit" class="btn-custom btn-primary">
-                        <i class="bi bi-{% if creating_store %}check-circle{% else %}save{% endif %} me-2"></i>
-                        {% if creating_store %}Create Store{% else %}Update Store{% endif %}
-                    </button>
-                </div>
-            </form>
-        </div>
-
-        <!-- Tips Sidebar -->
-        <div class="tips-sidebar">
-            <div class="tips-card">
-                <div class="tips-header">
-                    <i class="bi bi-lightbulb"></i>
-                    <h3>Store Setup Tips</h3>
-                </div>
-                
-                {% if creating_store %}
-                <div class="tip-item-modern">
-                    <div class="tip-title">🏪 Choose a Memorable Name</div>
-                    <p class="tip-description">Pick a name that reflects your brand and is easy to remember.</p>
-                </div>
-                
-                <div class="tip-item-modern">
-                    <div class="tip-title">📝 Clear Description</div>
-                    <p class="tip-description">Describe what makes your store unique and what products you offer.</p>
-                </div>
-                
-                <div class="tip-item-modern">
-                    <div class="tip-title">🖼️ Professional Branding</div>
-                    <p class="tip-description">Use high-quality logo and cover images to build trust with customers.</p>
-                </div>
-                
-                <div class="tip-item-modern">
-                    <div class="tip-title">⭐ Get Featured</div>
-                    <p class="tip-description">Upgrade to premium to get featured placement and increase visibility.</p>
-                </div>
                 {% else %}
-                <div class="tip-item-modern">
-                    <div class="tip-title">📈 Keep Information Updated</div>
-                    <p class="tip-description">Regularly update your store details to maintain customer trust.</p>
-                </div>
-                
-                <div class="tip-item-modern">
-                    <div class="tip-title">🔄 Refresh Your Look</div>
-                    <p class="tip-description">Update images and descriptions to keep your store fresh and appealing.</p>
-                </div>
-                
-                <div class="tip-item-modern">
-                    <div class="tip-title">⭐ Featured Store Benefits</div>
-                    <p class="tip-description">Get featured for increased visibility, priority placement, and better sales.</p>
-                </div>
+                    <div class="alert alert-warning py-1 mt-1 small">
+                        <i class="bi bi-lock-fill me-1"></i> Upgrade to Premium.
+                    </div>
+                    <a href="{% url 'storefront:subscription_plan_select' slug=store.slug %}" class="btn-custom btn-primary w-100 mt-1">Upgrade</a>
                 {% endif %}
             </div>
 
-            <!-- Premium CTA -->
-            {% if not creating_store and not can_be_featured %}
-            <div class="premium-cta">
-                <h4>🚀 Ready to Grow?</h4>
-                <p>Upgrade to Premium for featured placement and advanced features</p>
-                <a href="{% url 'storefront:subscription_plan_select' slug=store.slug %}" class="btn-custom btn-warning w-100">
-                    <i class="bi bi-lightning-charge me-1"></i>
-                    Upgrade to Premium
-                </a>
-            </div>
-            {% elif not creating_store and can_be_featured %}
-            <div class="alert alert-success">
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-star-fill me-2"></i>
-                    <div>
-                        <strong>Premium Store</strong>
-                        <p class="mb-0 small">You're enjoying premium features!</p>
-                        {% if is_enterprise %}
-                        <span class="badge bg-warning text-dark mt-1">Enterprise</span>
-                        {% endif %}
-                    </div>
+            <!-- Payout -->
+            <div class="form-section-card">
+                <h3 class="section-title"><i class="bi bi-wallet2"></i> Payout</h3>
+                <div class="form-group">
+                    <label class="form-label">M‑Pesa Phone</label>
+                    {% if store.payout_verified %}
+                        <input type="text" class="form-control" value="{{ store.payout_phone }}" disabled>
+                        <small class="text-success">Verified</small>
+                    {% else %}
+                        <input type="text" class="form-control" id="payoutPhone" name="payout_phone" value="{{ store.payout_phone|default:'' }}" placeholder="2547XXXXXXXX">
+                        <form method="post" action="{% url 'storefront:start_payout_verification' store.slug %}" class="mt-1">
+                            {% csrf_token %}
+                            <input type="hidden" name="phone" id="verifyPhoneInput">
+                            <button class="btn btn-outline-primary btn-sm w-100" type="submit" onclick="document.getElementById('verifyPhoneInput').value = document.getElementById('payoutPhone').value;">Verify</button>
+                        </form>
+                    {% endif %}
                 </div>
             </div>
             {% endif %}
 
-            <!-- Support Card -->
-            <div class="tips-card mt-3">
-                <div class="tips-header">
-                    <i class="bi bi-question-circle"></i>
-                    <h3>Need Help?</h3>
-                </div>
-                <p class="text-muted mb-3">Our support team is here to help you with any questions.</p>
-                <a href="mailto:help@baysoko.com" class="btn-custom btn-outline-primary w-100">
-                    <i class="bi bi-envelope me-2"></i>
-                    Contact Support
-                </a>
+            <!-- Actions -->
+            <div class="form-actions">
+                <a href="{% url 'storefront:seller_dashboard' %}" class="btn-custom btn-ghost">Cancel</a>
+                <button type="submit" class="btn-custom btn-primary">
+                    <i class="bi bi-{% if creating_store %}check-circle{% else %}save{% endif %}"></i>
+                    {% if creating_store %}Create{% else %}Update{% endif %}
+                </button>
             </div>
+        </form>
+    </div>
+
+    <!-- Tips Sidebar -->
+    <div class="tips-sidebar">
+        <div class="tips-card">
+            <div class="tips-header">
+                <i class="bi bi-lightbulb"></i>
+                <h3>Tips</h3>
+            </div>
+            <div class="tip-item"><strong>🏪 Memorable name</strong><br>Keep it short.</div>
+            <div class="tip-item"><strong>📝 Clear description</strong><br>Tell what you sell.</div>
+            <div class="tip-item"><strong>🖼️ Quality images</strong><br>Builds trust.</div>
         </div>
+        {% if not creating_store and not can_be_featured %}
+        <div class="tips-card" style="background: var(--warning); color: var(--dark);">
+            <h4 class="fw-bold small">🚀 Upgrade to Premium</h4>
+            <p class="small">Get featured and more.</p>
+            <a href="{% url 'storefront:subscription_plan_select' slug=store.slug %}" class="btn-custom btn-primary w-100">Upgrade</a>
+        </div>
+        {% endif %}
     </div>
 </div>
 
-<!-- Delete Logo Modal -->
-{% if not creating_store and store.logo %}
-<div class="modal fade" id="deleteLogoModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold">Remove Logo</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body text-center py-var(--spacing-xl)">
-                <i class="bi bi-trash text-danger display-6 mb-3"></i>
-                <p class="mb-0">Are you sure you want to remove your store logo?</p>
-            </div>
-            <div class="modal-footer justify-content-center">
-                <form method="post" action="{% url 'storefront:delete_logo' slug=store.slug %}">
-                    {% csrf_token %}
-                    <button type="submit" class="btn-custom btn-danger">Remove Logo</button>
-                </form>
-                <button type="button" class="btn-custom btn-ghost" data-bs-dismiss="modal">Cancel</button>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
-
-<!-- Delete Cover Modal -->
-{% if not creating_store and store.cover_image %}
-<div class="modal fade" id="deleteCoverModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold">Remove Cover Image</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body text-center py-var(--spacing-xl)">
-                <i class="bi bi-trash text-danger display-6 mb-3"></i>
-                <p class="mb-0">Are you sure you want to remove your store cover image?</p>
-            </div>
-            <div class="modal-footer justify-content-center">
-                <form method="post" action="{% url 'storefront:delete_cover' slug=store.slug %}">
-                    {% csrf_token %}
-                    <button type="submit" class="btn-custom btn-danger">Remove Cover</button>
-                </form>
-                <button type="button" class="btn-custom btn-ghost" data-bs-dismiss="modal">Cancel</button>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
-
+<!-- Delete modals (if needed) ... -->
 {% endblock %}
 
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Auto-generate slug from store name
+    // Slug generation
     const nameField = document.querySelector('input[name="name"]');
     const slugField = document.querySelector('input[name="slug"]');
-    
     if (nameField && slugField) {
         nameField.addEventListener('input', function() {
             if (!slugField.value || slugField.dataset.manual !== 'true') {
-                const slug = this.value
-                    .toLowerCase()
-                    .trim()
-                    .replace(/[^\w\s-]/g, '')
-                    .replace(/[\s_-]+/g, '-')
-                    .replace(/^-+|-+$/g, '');
-                slugField.value = slug;
+                slugField.value = this.value.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '');
             }
         });
-        
-        // Mark slug as manually edited
-        slugField.addEventListener('input', function() {
-            this.dataset.manual = 'true';
-        });
+        slugField.addEventListener('input', function() { this.dataset.manual = 'true'; });
     }
-    
-    // File upload drag & drop - FIXED VERSION
-    const logoUploadArea = document.getElementById('logoUploadArea');
-    const coverUploadArea = document.getElementById('coverUploadArea');
+
+    // Description counter
+    const descField = document.querySelector('textarea[name="description"]');
+    const descCounter = document.getElementById('description-counter');
+    if (descField && descCounter) {
+        function update() { descCounter.textContent = descField.value.length + '/2000'; }
+        descField.addEventListener('input', update);
+        update();
+    }
+
+    // Image preview (basic)
     const logoInput = document.getElementById('id_logo');
+    const logoPreview = document.getElementById('logoPreviewContainer');
+    if (logoInput && logoPreview) {
+        logoInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const existing = logoPreview.querySelector('.no-preview');
+                    if (existing) existing.remove();
+                    const div = document.createElement('div');
+                    div.className = 'preview-item-modern';
+                    div.innerHTML = `<img src="${e.target.result}" class="preview-img-modern"><span class="preview-badge">New</span>`;
+                    logoPreview.appendChild(div);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
     const coverInput = document.getElementById('id_cover_image');
-    const logoPreviewContainer = document.getElementById('logoPreviewContainer');
-    const coverPreviewContainer = document.getElementById('coverPreviewContainer');
-    // keep references to files when programmatic assignment to input.files fails
-    let logoFile = null;
-    let coverFile = null;
-    let logoInputAssigned = false;
-    let coverInputAssigned = false;
-    
-    function setupDragDrop(uploadArea, input, previewContainer) {
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            uploadArea.addEventListener(eventName, preventDefaults, false);
-        });
-        
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        
-        ['dragenter', 'dragover'].forEach(eventName => {
-            uploadArea.addEventListener(eventName, () => {
-                uploadArea.classList.add('drag-over');
-            }, false);
-        });
-        
-        ['dragleave', 'drop'].forEach(eventName => {
-            uploadArea.addEventListener(eventName, () => {
-                uploadArea.classList.remove('drag-over');
-            }, false);
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                if (input === logoInput) {
-                    handleImageUpload(files[0], input, previewContainer, 'logo');
-                } else {
-                    handleImageUpload(files[0], input, previewContainer, 'cover');
-                }
+    const coverPreview = document.getElementById('coverPreviewContainer');
+    if (coverInput && coverPreview) {
+        coverInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const existing = coverPreview.querySelector('.no-preview');
+                    if (existing) existing.remove();
+                    const div = document.createElement('div');
+                    div.className = 'preview-item-modern';
+                    div.innerHTML = `<img src="${e.target.result}" class="preview-img-modern"><span class="preview-badge">New</span>`;
+                    coverPreview.appendChild(div);
+                };
+                reader.readAsDataURL(file);
             }
-        }, false);
+        });
     }
-    
-    function handleImageUpload(file, input, previewContainer, type) {
-        if (!file || !file.type.match('image.*')) {
-            showToast('Please select a valid image file.', 'error');
-            return;
-        }
-        
-        // Check file size (10MB limit)
-        if (file.size > 10 * 1024 * 1024) {
-            showToast('Image file is too large. Maximum size is 10MB.', 'error');
-            return;
-        }
-        
-        // Attach file to the actual input so form submission includes it (if possible)
-        try {
-            const dt = new DataTransfer();
-            dt.items.add(file);
-            if (input) input.files = dt.files;
-            if (type === 'logo') {
-                logoInputAssigned = true;
-                logoFile = file;
-            } else {
-                coverInputAssigned = true;
-                coverFile = file;
-            }
-        } catch (e) {
-            console.warn('Could not attach file to input programmatically', e);
-            if (type === 'logo') {
-                logoInputAssigned = false;
-                logoFile = file;
-            } else {
-                coverInputAssigned = false;
-                coverFile = file;
-            }
-        }
 
-        displayImagePreview(file, input, previewContainer, type);
-        showToast(`${type === 'logo' ? 'Logo' : 'Cover image'} uploaded successfully`, 'success');
-    }
-    
-    function displayImagePreview(file, input, container, type) {
-        const reader = new FileReader();
-        
-        reader.onload = function(e) {
-            // Remove placeholder if present
-            const noPreview = container.querySelector('.no-preview');
-            if (noPreview) {
-                noPreview.remove();
-            }
-            
-            // Clear existing preview (for new images)
-            const existingPreview = container.querySelector('.preview-item-modern:not(.existing-image)');
-            if (existingPreview) {
-                existingPreview.remove();
-            }
-            
-            const previewItem = document.createElement('div');
-            previewItem.className = 'preview-item-modern new-image-preview-item';
-            
-            const img = document.createElement('img');
-            img.src = e.target.result;
-            img.className = 'preview-img-modern';
-            img.alt = `New ${type} preview`;
-            
-            const overlay = document.createElement('div');
-            overlay.className = 'preview-overlay-modern';
-            
-            const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
-            removeBtn.className = 'btn btn-danger btn-sm';
-            removeBtn.innerHTML = '<i class="bi bi-trash"></i>';
-            removeBtn.title = 'Remove image';
-            removeBtn.onclick = function() {
-                previewItem.remove();
-                input.value = '';
-                
-                // Show placeholder again if no images
-                if (container.querySelectorAll('.preview-item-modern').length === 0) {
-                    const placeholder = document.createElement('div');
-                    placeholder.className = 'no-preview';
-                    placeholder.id = `${type}NoPreview`;
-                    placeholder.innerHTML = `
-                        <i class="bi bi-${type === 'logo' ? 'image' : 'images'} display-6 text-muted mb-2"></i>
-                        <p class="mb-0">No ${type} selected yet</p>
-                    `;
-                    container.appendChild(placeholder);
-                }
-                showToast(`${type === 'logo' ? 'Logo' : 'Cover image'} removed`, 'info');
-            };
-            
-            overlay.appendChild(removeBtn);
-            previewItem.appendChild(img);
-            previewItem.appendChild(overlay);
-            
-            // Add new image badge
-            const badge = document.createElement('div');
-            badge.className = 'preview-badge new-image-badge';
-            badge.textContent = 'New';
-            badge.style.position = 'absolute';
-            badge.style.top = '8px';
-            badge.style.left = '8px';
-            previewItem.appendChild(badge);
-            
-            container.appendChild(previewItem);
-        };
-        
-        reader.readAsDataURL(file);
-    }
-    
-    // Setup drag & drop
-    if (logoUploadArea && logoInput && logoPreviewContainer) {
-        setupDragDrop(logoUploadArea, logoInput, logoPreviewContainer);
-    }
-    
-    if (coverUploadArea && coverInput && coverPreviewContainer) {
-        setupDragDrop(coverUploadArea, coverInput, coverPreviewContainer);
-    }
-    
-    // File input change handlers
-    if (logoInput) {
-        logoInput.addEventListener('change', function(e) {
-            if (this.files.length > 0) {
-                handleImageUpload(this.files[0], this, logoPreviewContainer, 'logo');
-            }
-        });
-    }
-    
-    if (coverInput) {
-        coverInput.addEventListener('change', function(e) {
-            if (this.files.length > 0) {
-                handleImageUpload(this.files[0], this, coverPreviewContainer, 'cover');
-            }
-        });
-    }
-    
-    // Form validation
-    const form = document.getElementById('storeForm');
-    if (form) {
-        form.addEventListener('submit', function(e) {
-            // If programmatic assignment to input.files failed, do AJAX submit with files appended
-            if ((logoFile && !logoInputAssigned) || (coverFile && !coverInputAssigned)) {
+    // Simple validation
+    document.getElementById('storeForm').addEventListener('submit', function(e) {
+        const required = this.querySelectorAll('[required]');
+        for (let f of required) {
+            if (!f.value.trim()) {
                 e.preventDefault();
-                const fd = new FormData(form);
-                if (logoFile && !logoInputAssigned) fd.set('logo', logoFile, logoFile.name);
-                if (coverFile && !coverInputAssigned) fd.set('cover_image', coverFile, coverFile.name);
-
-                fetch(form.action || window.location.href, {
-                    method: 'POST',
-                    body: fd,
-                    credentials: 'same-origin',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                }).then(response => {
-                    if (response.redirected) {
-                        window.location.href = response.url;
-                    } else {
-                        return response.text().then(html => {
-                            document.open();
-                            document.write(html);
-                            document.close();
-                        });
-                    }
-                }).catch(err => {
-                    console.error('AJAX upload failed', err);
-                    showToast('Upload failed. Please try again.', 'error');
-                });
+                alert('Please fill all required fields.');
                 return;
             }
-        });
-        form.addEventListener('submit', function(e) {
-            const requiredFields = form.querySelectorAll('[required]');
-            let isValid = true;
-            
-            requiredFields.forEach(field => {
-                if (!field.value.trim()) {
-                    field.classList.add('is-invalid');
-                    isValid = false;
-                } else {
-                    field.classList.remove('is-invalid');
-                }
-            });
-            
-            if (!isValid) {
-                e.preventDefault();
-                showToast('Please fill in all required fields', 'danger');
-            }
-        });
-    }
-
-    // Character counters
-    function initCharacterCounters() {
-        const descriptionInput = document.getElementById('{{ form.description.id_for_label }}');
-        const descriptionCounter = document.createElement('div');
-        descriptionCounter.className = 'char-counter mt-2';
-        descriptionCounter.id = 'description-counter';
-        
-        if (descriptionInput) {
-            descriptionInput.parentNode.appendChild(descriptionCounter);
-            
-            function updateCounter() {
-                const length = descriptionInput.value.length;
-                descriptionCounter.textContent = `${length}/2000 characters`;
-                
-                descriptionCounter.classList.remove('near-limit', 'over-limit');
-                if (length >= 1800) {
-                    descriptionCounter.classList.add('over-limit');
-                } else if (length >= 1500) {
-                    descriptionCounter.classList.add('near-limit');
-                }
-            }
-            
-            descriptionInput.addEventListener('input', updateCounter);
-            updateCounter();
         }
-    }
-    
-    initCharacterCounters();
-    
-    // Featured store info tooltip
-    const featuredCheckbox = document.querySelector('input[name="is_featured"]');
-    if (featuredCheckbox) {
-        featuredCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                showToast('Your store will be featured in the directory!', 'success');
-            }
-        });
-    }
-});
-
-// Toast function for form validation
-function showToast(message, type = 'info') {
-    const toastContainer = document.querySelector('.toast-container') || createToastContainer();
-    const toastId = 'toast-' + Date.now();
-    
-    const toast = document.createElement('div');
-    toast.id = toastId;
-    toast.className = `toast align-items-center text-white bg-${type} border-0`;
-    toast.setAttribute('role', 'alert');
-    toast.setAttribute('aria-live', 'assertive');
-    toast.setAttribute('aria-atomic', 'true');
-    
-    toast.innerHTML = `
-        <div class="d-flex">
-            <div class="toast-body d-flex align-items-center">
-                <i class="bi bi-${type === 'danger' ? 'exclamation-triangle' : 'info-circle'} me-2"></i>
-                ${message}
-            </div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-            </div>
-        </div>
-    `;
-    
-    toastContainer.appendChild(toast);
-    const bsToast = new bootstrap.Toast(toast, { delay: 5000 });
-    bsToast.show();
-    
-    // Remove toast after it hides
-    toast.addEventListener('hidden.bs.toast', function() {
-        toast.remove();
     });
-}
-
-function createToastContainer() {
-    const container = document.createElement('div');
-    container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
-    document.body.appendChild(container);
-    return container;
-}
+});
 </script>
 {% endblock %}

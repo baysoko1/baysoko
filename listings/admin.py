@@ -3,8 +3,21 @@ from .models import Category, Listing
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ['name', 'description']
+    list_display = ['name', 'description', 'schema_group']
     search_fields = ['name']
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'description', 'icon', 'is_active', 'order', 'is_featured')
+        }),
+        ('Schema', {
+            'classes': ('collapse',),
+            'fields': ('schema_group', 'fields_schema'),
+            'description': 'Optionally specify a group key to share schemas between categories.'
+        }),
+    )
+    readonly_fields = []
+    # consider using a JSON editor widget elsewhere if desired
+
 
 @admin.register(Listing)
 class ListingAdmin(admin.ModelAdmin):

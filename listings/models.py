@@ -34,6 +34,9 @@ class Category(models.Model):
     is_active = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
     is_featured = models.BooleanField(default=False)
+    # Optional grouping key: categories sharing the same group will inherit the same schema
+    schema_group = models.CharField(max_length=100, blank=True, help_text="Optional key to group categories for shared field schemas")
+    fields_schema = models.JSONField(default=dict, blank=True, help_text="JSON schema for category-specific fields")
 
     def __str__(self):
         return self.name
@@ -161,6 +164,8 @@ class Listing(models.Model):
         null=True, 
         blank=True
     )
+    # Stores values for category-specific dynamic fields (keyed by field name)
+    dynamic_fields = models.JSONField(default=dict, blank=True, help_text="Stores category-specific field values")
 
     def __str__(self):
         return self.title

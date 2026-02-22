@@ -1934,6 +1934,27 @@
                         </div>
                     </section>
                     {% endif %}
+
+                    {# Dynamic category-specific fields stored in listing.dynamic_fields - rendered from view context dynamic_fields_display #}
+                    {% if dynamic_fields_display %}
+                    <section class="specifications mt-3">
+                        <h5><i class="bi bi-puzzle me-2"></i>Category Details</h5>
+                        <div class="specs-table">
+                            {% for df in dynamic_fields_display %}
+                            <div class="spec-row">
+                                <span class="spec-label">{{ df.label }}</span>
+                                <span class="spec-value">
+                                    {% if df.type == 'boolean' %}
+                                        {% if df.value %}Yes{% else %}No{% endif %}
+                                    {% else %}
+                                        {{ df.value }}
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </section>
+                    {% endif %}
                     
                     <div class="listing-actions">
                         {% if user.is_authenticated and user != listing.seller %}

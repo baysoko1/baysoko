@@ -113,10 +113,72 @@ class ListingForm(forms.ModelForm):
         if listing.store:
             listing.is_featured = self._get_featured_status(listing.store)
         
+        # dynamic_fields may be set in cleaned_data by clean(); ensure it is assigned
+        try:
+            if 'dynamic_fields' in getattr(self, 'cleaned_data', {}):
+                listing.dynamic_fields = self.cleaned_data.get('dynamic_fields') or {}
+        except Exception:
+            pass
+
         if commit:
             listing.save()
         
         return listing
+
+    def clean(self):
+        cleaned_data = super().clean()
+        category = cleaned_data.get('category')
+
+        # Get JSON payload from POST (hidden input name 'dynamic_fields')
+        raw = None
+        try:
+            raw = self.data.get('dynamic_fields') if hasattr(self, 'data') else None
+        except Exception:
+            raw = None
+
+        import json
+        dynamic_data = {}
+        if raw:
+            try:
+                dynamic_data = json.loads(raw)
+            except Exception:
+                raise forms.ValidationError('Invalid dynamic fields data.')
+
+        # Validate against category schema if provided (with group fallback)
+        schema = {}
+        if category:
+            schema = getattr(category, 'fields_schema', None) or {}
+            if (not schema or schema == {}) and getattr(category, 'schema_group', None):
+                # look for another category in same group with a schema
+                fallback = Category.objects.filter(schema_group=category.schema_group).exclude(fields_schema={}).first()
+                if fallback and getattr(fallback, 'fields_schema', None):
+                    schema = fallback.fields_schema or {}
+        if schema:
+            for field_def in schema.get('fields', []):
+                fname = field_def.get('name')
+                required = field_def.get('required', False)
+                ftype = field_def.get('type', 'text')
+                label = field_def.get('label', fname)
+                value = dynamic_data.get(fname)
+
+                if required and (value is None or value == ''):
+                    self.add_error(None, f"{label} is required.")
+                    continue
+
+                if value is not None and value != '':
+                    # Type checks
+                    if ftype == 'number':
+                        try:
+                            # allow numeric strings
+                            float(value)
+                        except Exception:
+                            self.add_error(None, f"{label} must be a number.")
+                    if ftype == 'select' and 'choices' in field_def:
+                        if value not in field_def.get('choices', []):
+                            self.add_error(None, f"{label} is an invalid choice.")
+
+        cleaned_data['dynamic_fields'] = dynamic_data
+        return cleaned_data
     
     def _get_featured_status(self, store):
         """Determine if listing should be featured based on store's active subscription"""

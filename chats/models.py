@@ -4,6 +4,7 @@ from django.utils import timezone
 from typing import TYPE_CHECKING
 from django.conf import settings
 from django.core.files.base import ContentFile
+import mimetypes
 
 try:
     from cloudinary.models import CloudinaryField
@@ -104,6 +105,34 @@ class MessageAttachment(models.Model):
     content_type = models.CharField(max_length=100, blank=True)
     size = models.IntegerField(null=True, blank=True)
 
+    @property
+    def file_url(self):
+        """Return the correct URL for the attachment."""
+        if not self.file:
+            return None
+
+        if _HAS_CLOUDINARY:
+            try:
+                # Determine resource type from content_type
+                if self.content_type.startswith('image/'):
+                    resource_type = 'image'
+                elif self.content_type.startswith('video/'):
+                    resource_type = 'video'
+                else:
+                    resource_type = 'raw'
+
+                public_id = self.file.public_id  # e.g. chat_attachments/25/filename
+                url, _ = cloudinary_url(
+                    public_id,
+                    resource_type=resource_type,
+                    secure=True,  # forces https://
+                )
+                return url
+            except Exception:
+                return str(self.file)
+        else:
+            return self.file.url
+
     def save(self, *args, **kwargs):
         # Ensure metadata fields are populated from the uploaded file
         try:
@@ -128,19 +157,10 @@ class MessageAttachment(models.Model):
                 except Exception:
                     self.size = None
 
-                # Content type: try to infer from file or filename
                 try:
                     ct = getattr(f, 'content_type', '') or getattr(f, 'mime_type', '')
                     if not ct and self.filename:
-                        # very light heuristic based on extension
-                        if self.filename.lower().endswith(('.jpg', '.jpeg')):
-                            ct = 'image/jpeg'
-                        elif self.filename.lower().endswith('.png'):
-                            ct = 'image/png'
-                        elif self.filename.lower().endswith('.gif'):
-                            ct = 'image/gif'
-                        else:
-                            ct = ''
+                        ct, _ = mimetypes.guess_type(self.filename)
                     self.content_type = ct or ''
                 except Exception:
                     self.content_type = ''

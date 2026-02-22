@@ -1,6 +1,7 @@
 import json
 import uuid
 import logging
+import re
 import mimetypes
 import urllib.request
 from datetime import timedelta
@@ -470,7 +471,15 @@ def send_unified_message(request):
                 if att.get('saved_path'):
                     ma = MessageAttachment(message=message)
                     # set file name directly to saved storage path so FileField references it
-                    ma.file.name = att['saved_path']
+                    # sanitize any accidental storage prefixes like 'v1/media/' or leading 'media/'
+                    sp = att['saved_path']
+                    if isinstance(sp, str):
+                        sp = sp.lstrip('/')
+                        # remove versioned media prefix (e.g. v1/media/)
+                        sp = re.sub(r"^v\d+\/media\/", "", sp)
+                        # remove plain leading media/ if present
+                        sp = re.sub(r"^media\/", "", sp)
+                    ma.file.name = sp
                     ma.filename = att.get('name') or ''
                     ma.content_type = att.get('type') or ''
                     ma.size = att.get('size') or None

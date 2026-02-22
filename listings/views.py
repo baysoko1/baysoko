@@ -615,6 +615,32 @@ class ListingDetailView(DetailView):
             context['price_change'] = 0
             context['price_change_percentage'] = 0
 
+        # Prepare dynamic fields display using category schema (label -> value), with group fallback
+        try:
+            dynamic_display = []
+            schema = getattr(listing.category, 'fields_schema', None) or {}
+            # if empty schema but category belongs to a group, try to pick group's schema
+            if (not schema or schema == {}) and getattr(listing.category, 'schema_group', None):
+                group = listing.category.schema_group
+                # find another category in group with a schema
+                fallback = Category.objects.filter(schema_group=group).exclude(fields_schema={}).first()
+                if fallback and fallback.fields_schema:
+                    schema = fallback.fields_schema
+            fields = schema.get('fields', []) if isinstance(schema, dict) else []
+            for fd in fields:
+                name = fd.get('name')
+                label = fd.get('label') or name
+                val = None
+                try:
+                    val = listing.dynamic_fields.get(name)
+                except Exception:
+                    val = None
+                if val is not None and val != '':
+                    dynamic_display.append({'name': name, 'label': label, 'value': val, 'type': fd.get('type')})
+            context['dynamic_fields_display'] = dynamic_display
+        except Exception:
+            context['dynamic_fields_display'] = []
+
         return context
 
     
@@ -647,6 +673,24 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
             context = {}
         # Add categories to context for the form
         context['categories'] = Category.objects.filter(is_active=True)
+        # Provide category schemas for dynamic form rendering (id -> schema), with group fallback
+        try:
+            cats = Category.objects.filter(is_active=True).only('id', 'fields_schema', 'schema_group')
+            group_map = {}
+            for c in cats:
+                if c.schema_group and c.fields_schema:
+                    group_map[c.schema_group] = c.fields_schema
+            category_schemas = {}
+            for c in cats:
+                if c.fields_schema:
+                    category_schemas[str(c.id)] = c.fields_schema
+                elif c.schema_group and c.schema_group in group_map:
+                    category_schemas[str(c.id)] = group_map[c.schema_group]
+                else:
+                    category_schemas[str(c.id)] = {}
+            context['category_schemas'] = category_schemas
+        except Exception:
+            context['category_schemas'] = {}
         # AI availability flag for templates
         try:
             from .ai_listing_helper import listing_ai
@@ -850,6 +894,24 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             context['stores'] = Store.objects.none()
         # Pass existing store for template
         context['current_store'] = self.object.store
+        # Provide category schemas for dynamic form rendering (id -> schema), with group fallback
+        try:
+            cats = Category.objects.filter(is_active=True).only('id', 'fields_schema', 'schema_group')
+            group_map = {}
+            for c in cats:
+                if c.schema_group and c.fields_schema:
+                    group_map[c.schema_group] = c.fields_schema
+            category_schemas = {}
+            for c in cats:
+                if c.fields_schema:
+                    category_schemas[str(c.id)] = c.fields_schema
+                elif c.schema_group and c.schema_group in group_map:
+                    category_schemas[str(c.id)] = group_map[c.schema_group]
+                else:
+                    category_schemas[str(c.id)] = {}
+            context['category_schemas'] = category_schemas
+        except Exception:
+            context['category_schemas'] = {}
         return context
     
     def get_form_kwargs(self):
