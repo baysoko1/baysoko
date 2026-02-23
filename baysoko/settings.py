@@ -152,9 +152,10 @@ if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
     cloudinary.config(
         cloud_name=CLOUDINARY_CLOUD_NAME,
         api_key=CLOUDINARY_API_KEY,
-        api_secret=CLOUDINARY_API_SECRET
+        api_secret=CLOUDINARY_API_SECRET,
+        secure=True  # force HTTPS for all generated URLs
     )
-    print("✅ Cloudinary configured successfully")
+    print("✅ Cloudinary configured successfully (secure HTTPS enabled)")
 else:
     # Fallback to local file storage
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'

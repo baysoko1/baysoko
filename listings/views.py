@@ -691,6 +691,15 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
             context['category_schemas'] = category_schemas
         except Exception:
             context['category_schemas'] = {}
+        # Provide initial dynamic fields for client-side prepopulation (create view: empty or from form)
+        try:
+            initial_dynamic = {}
+            form = kwargs.get('form')
+            if form and getattr(form.instance, 'dynamic_fields', None):
+                initial_dynamic = form.instance.dynamic_fields
+            context['initial_dynamic_fields'] = initial_dynamic
+        except Exception:
+            context['initial_dynamic_fields'] = {}
         # AI availability flag for templates
         try:
             from .ai_listing_helper import listing_ai
@@ -912,6 +921,11 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             context['category_schemas'] = category_schemas
         except Exception:
             context['category_schemas'] = {}
+        # Ensure the template has the listing's existing dynamic fields for prepopulation
+        try:
+            context['initial_dynamic_fields'] = self.object.dynamic_fields if getattr(self, 'object', None) and getattr(self.object, 'dynamic_fields', None) else {}
+        except Exception:
+            context['initial_dynamic_fields'] = {}
         return context
     
     def get_form_kwargs(self):

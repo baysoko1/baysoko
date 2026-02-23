@@ -57,7 +57,11 @@ class User(AbstractUser):
             try:
                 try:
                     if hasattr(self.profile_picture, 'url') and self.profile_picture.url:
-                        return self.profile_picture.url
+                        url = self.profile_picture.url
+                        # make sure the url is https to avoid mixed content
+                        if url.startswith('http://'):
+                            url = 'https://' + url.split('://', 1)[1]
+                        return url
                 except Exception:
                     pass
                 try:
@@ -88,7 +92,10 @@ class User(AbstractUser):
             try:
                 try:
                     if hasattr(self.cover_photo, 'url') and self.cover_photo.url:
-                        return self.cover_photo.url
+                        url = self.cover_photo.url
+                        if url.startswith('http://'):
+                            url = 'https://' + url.split('://', 1)[1]
+                        return url
                 except Exception:
                     pass
                 try:

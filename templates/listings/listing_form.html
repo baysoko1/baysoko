@@ -408,7 +408,11 @@
                     </select>
                 </div>
                 <!-- Hidden input to hold JSON for dynamic fields -->
-                <input type="hidden" name="dynamic_fields" id="id_dynamic_fields" value="{{ form.instance.dynamic_fields|default:'{}' }}">
+                <input type="hidden" name="dynamic_fields" id="id_dynamic_fields" value="{}">
+
+                {# Embed the listing's existing dynamic fields as safe JSON for client-side use. #}
+                {# Use json_script so the payload is valid JSON (avoids Python repr with single quotes). #}
+                {{ initial_dynamic_fields|default:"{}"|json_script:"initial-dynamic-fields" }}
 
                 {# Embed category schemas as JSON for client-side rendering using json_script to ensure valid JSON #}
                 {{ category_schemas|default:"{}"|json_script:"category-schemas" }}
@@ -487,12 +491,30 @@
                         </div>
                         <div id="dynamic-fields"></div>
                     </div>
-                    {{ form.brand|as_crispy_field }}
-                {{ form.model|as_crispy_field }}
-                {{ form.color|as_crispy_field }}
-                {{ form.material|as_crispy_field }}
-                {{ form.dimensions|as_crispy_field }}
-                {{ form.weight|as_crispy_field }}
+                   
+                    <div class="standard-field-container" data-field="brand">
+                        {{ form.brand|as_crispy_field }}
+                    </div>
+
+                    <div class="standard-field-container" data-field="model">
+                        {{ form.model|as_crispy_field }}
+                    </div>
+
+                    <div class="standard-field-container" data-field="color">
+                        {{ form.color|as_crispy_field }}
+                    </div>
+
+                    <div class="standard-field-container" data-field="material">
+                        {{ form.material|as_crispy_field }}
+                    </div>
+
+                    <div class="standard-field-container" data-field="dimensions">
+                        {{ form.dimensions|as_crispy_field }}
+                    </div>
+
+                    <div class="standard-field-container" data-field="weight">
+                        {{ form.weight|as_crispy_field }}
+                    </div>
                 <div class="form-group full-width">
                     <label for="{{ form.meta_description.id_for_label }}" class="form-label">Meta Description (SEO)</label>
                     <textarea name="{{ form.meta_description.name }}" id="{{ form.meta_description.id_for_label }}"
@@ -647,8 +669,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const dynamicFieldsDiv = document.getElementById('dynamic-fields');
         const dynamicInput = document.getElementById('id_dynamic_fields');
 
+        // Try to load the server-provided initial dynamic fields JSON (safe via json_script).
         let existingDynamic = {};
-        try { existingDynamic = JSON.parse(dynamicInput.value || '{}'); } catch (e) { existingDynamic = {}; }
+        try {
+            const initEl = document.getElementById('initial-dynamic-fields');
+            if (initEl) {
+                existingDynamic = JSON.parse(initEl.textContent || '{}');
+                if (dynamicInput) dynamicInput.value = JSON.stringify(existingDynamic);
+            } else {
+                existingDynamic = JSON.parse(dynamicInput.value || '{}');
+            }
+        } catch (e) {
+            existingDynamic = {};
+        }
 
         function renderDynamicFields(categoryId){
             const schema = categorySchemas[String(categoryId)];
@@ -689,6 +722,27 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '</div>';
             dynamicFieldsDiv.innerHTML = html;
         }
+        // Hide standard fields based on the selected category
+        function applyStandardFieldsVisibility(categoryId) {
+            const schema = categorySchemas[String(categoryId)] || {};
+            const hideFields = schema.hide_standard_fields || [];
+
+            document.querySelectorAll('.standard-field-container').forEach(container => {
+                const fieldName = container.dataset.field;
+                container.style.display = hideFields.includes(fieldName) ? 'none' : '';
+            });
+        }
+
+        // Call it whenever category changes
+        categorySelect.addEventListener('change', function() {
+            // … your existing dynamic fields render …
+            applyStandardFieldsVisibility(this.value);
+        });
+
+        // Also call on page load for the initially selected category
+        if (categorySelect.value) {
+            applyStandardFieldsVisibility(categorySelect.value);
+        }
 
         if(categorySelect){
             // initial render
@@ -720,6 +774,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
     })();
+
     // ===== STEP WIZARD =====
     const steps = [1,2,3,4];
     let currentStep = 1;
