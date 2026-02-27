@@ -50,4 +50,10 @@ def create_user_settings(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=User)
 def save_user_settings(sender, instance, **kwargs):
-    instance.settings.save()
+    # Ensure `UserSettings` exists for this user, create if missing (avoids RelatedObjectDoesNotExist)
+    try:
+        settings_obj, created = UserSettings.objects.get_or_create(user=instance)
+        # Save the settings instance to trigger any save hooks if necessary
+        settings_obj.save()
+    except Exception:
+        logger.exception('Failed to ensure user settings exist for user %s', getattr(instance, 'pk', None))
