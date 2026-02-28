@@ -79,4 +79,40 @@ except Exception:
     # If celery.schedules isn't available at import time, skip schedule setup
     pass
 
+# Ensure Celery uses Django TIME_ZONE
+try:
+    from django.conf import settings as _dj_settings
+    app.conf.timezone = getattr(_dj_settings, 'TIME_ZONE', 'UTC')
+    # Keep enable_utc True to ensure consistent UTC handling internally
+    app.conf.enable_utc = True
+except Exception:
+    pass
+
+# Trigger a one-off startup reminders run when the worker is ready.
+try:
+    from celery.signals import worker_ready
+
+    @worker_ready.connect
+    def _on_worker_ready(sender, **kwargs):
+        """Run startup reminders once when the first worker starts.
+
+        Uses cache-based guard inside the task itself to avoid duplicates.
+        """
+        try:
+            # Import and call the trigger task (delay to run in background)
+            from storefront.tasks import trigger_startup_reminders
+            try:
+                trigger_startup_reminders.delay()
+            except Exception:
+                # As a fallback, call synchronously (best-effort)
+                try:
+                    trigger_startup_reminders()
+                except Exception:
+                    pass
+        except Exception:
+            # Do not raise on worker start errors
+            pass
+except Exception:
+    pass
+
 __all__ = ('app',)

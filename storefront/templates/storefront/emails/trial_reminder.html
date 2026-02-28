@@ -1,0 +1,9 @@
+<html>
+  <body>
+    <p>Hi {{ user.get_full_name|default:user.username }},</p>
+    <p>Your {{ plan_name }} trial for <strong>{{ store.name }}</strong> ends in {{ remaining_days }} day{{ remaining_days|pluralize }}.</p>
+    <p>Upgrade to a paid plan to keep premium features active.</p>
+    <p><a href="{{ request.site_url|default:'/dashboard' }}{{ '/dashboard/store/' }}{{ store.slug }}/subscription/plans/">Choose a plan</a></p>
+    <p>Thanks,<br/>The Baysoko Team</p>
+  </body>
+</html>

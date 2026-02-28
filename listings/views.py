@@ -850,13 +850,23 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
             from channels.layers import get_channel_layer
             channel_layer = get_channel_layer()
             # Minimal listing payload
+            # Build a small serializable payload for live listing broadcasts.
+            # Ensure we do not include method objects (call methods when present).
+            image_url = ''
+            if hasattr(form.instance, 'get_image_url'):
+                try:
+                    img_callable = getattr(form.instance, 'get_image_url')
+                    image_url = img_callable() if callable(img_callable) else str(img_callable)
+                except Exception:
+                    image_url = ''
+
             listing_data = {
                 'id': form.instance.id,
                 'title': form.instance.title,
                 'price': str(form.instance.price),
-                'image_url': form.instance.get_image_url if hasattr(form.instance, 'get_image_url') else '',
+                'image_url': image_url,
                 'seller_name': form.instance.seller.get_full_name() or form.instance.seller.username,
-                'total_favorites': getattr(form.instance, 'total_favorites', 0),
+                'total_favorites': int(getattr(form.instance, 'total_favorites', 0) or 0),
                 'url': form.instance.get_absolute_url() if hasattr(form.instance, 'get_absolute_url') else '',
             }
             # Send to all users' notification groups (graceful fallback for small scale)

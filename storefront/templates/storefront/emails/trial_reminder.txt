@@ -1,0 +1,9 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your {{ plan_name }} trial for {{ store.name }} ends in {{ remaining_days }} day{{ remaining_days|pluralize }}.
+
+Upgrade to a paid plan to keep premium features active:
+https://{{ request.site_domain|default:'example.com' }}/dashboard/store/{{ store.slug }}/subscription/plans/
+
+Thanks,
+The Baysoko Team

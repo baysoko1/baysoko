@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container">
+  <h2>Notifications <small id="unread-count">({{ unread_count }})</small></h2>
+
+  <div id="notifications-list">
+    {% for n in page_obj.object_list %}
+      <div class="notification-item{% if not n.is_read %} unread{% endif %}" data-id="{{ n.id }}">
+        <strong>{{ n.title }}</strong>
+        <p>{{ n.message }}</p>
+        {% if n.action_url %}<a href="{{ n.action_url }}">{{ n.action_text|default:'View' }}</a>{% endif %}
+      </div>
+    {% empty %}
+      <p>No notifications yet.</p>
+    {% endfor %}
+  </div>
+
+  {% if page_obj.has_previous or page_obj.has_next %}
+    <div class="pagination">
+      {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+      {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+    </div>
+  {% endif %}
+</div>
+
+<script>
+(() => {
+  const unreadCountEl = document.getElementById('unread-count');
+  const listEl = document.getElementById('notifications-list');
+
+  function renderNotification(n){
+    const div = document.createElement('div');
+    div.className = 'notification-item' + (n.is_read ? '' : ' unread');
+    div.dataset.id = n.id;
+    const title = document.createElement('strong');
+    title.textContent = n.title;
+    const p = document.createElement('p');
+    p.textContent = n.message;
+    div.appendChild(title);
+    div.appendChild(p);
+    if(n.action_url){
+      const a = document.createElement('a');
+      a.href = n.action_url;
+      a.textContent = n.action_text || 'View';
+      div.appendChild(a);
+    }
+    return div;
+  }
+
+  function updateUnreadCount(delta){
+    try{
+      const current = parseInt(unreadCountEl.textContent.replace(/[^0-9]/g,'')) || 0;
+      const next = Math.max(0, current + delta);
+      unreadCountEl.textContent = `(${next})`;
+    }catch(e){console.warn(e)}
+  }
+
+  const protocol = (location.protocol === 'https:') ? 'wss' : 'ws';
+  const wsUrl = `${protocol}://${location.host}/ws/notifications/`;
+  let socket;
+
+  function connect(){
+    socket = new WebSocket(wsUrl);
+    socket.addEventListener('open', () => console.debug('Notifications socket open'));
+    socket.addEventListener('close', () => { console.debug('Notifications socket closed, reconnecting in 2s'); setTimeout(connect,2000); });
+    socket.addEventListener('message', (ev)=>{
+      try{
+        const data = JSON.parse(ev.data);
+        if(data.type === 'connection_established'){
+          unreadCountEl.textContent = `(${data.unread_count||0})`;
+        } else if(data.type === 'notification_created'){
+          const node = renderNotification(data.notification);
+          if(listEl.firstChild){ listEl.insertBefore(node, listEl.firstChild); } else { listEl.appendChild(node); }
+          updateUnreadCount(1);
+        } else if(data.type === 'notification_marked_read'){
+          const el = listEl.querySelector(`[data-id='${data.notification_id}']`);
+          if(el) el.classList.remove('unread');
+          updateUnreadCount(-1);
+        } else if(data.type === 'bulk_marked_read'){
+          // mark all as read
+          listEl.querySelectorAll('.notification-item.unread').forEach(el=>el.classList.remove('unread'));
+          if(typeof data.unread_count !== 'undefined') unreadCountEl.textContent = `(${data.unread_count})`;
+        } else if(data.type === 'notification_deleted'){
+          const el = listEl.querySelector(`[data-id='${data.notification_id}']`);
+          if(el) el.remove();
+        }
+      }catch(err){console.error('Error handling notification WS message', err)}
+    });
+  }
+
+  connect();
+})();
+</script>
+
+{% endblock %}

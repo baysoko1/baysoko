@@ -18,26 +18,48 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
     Send an email using Brevo API if available, otherwise fall back to Django SMTP.
     Runs synchronously – intended to be called from a background thread.
     """
+    # Always attempt Brevo API first if an explicit API key is configured.
+    # In development (`DEBUG=True`) we still attempt the Brevo API/SMTP so
+    # behavior matches production.
+    if getattr(settings, 'DEBUG', False):
+        logger.info('DEBUG mode detected — attempting Brevo API/SMTP for email sending')
+
+    # Prefer using a real Brevo/API key when provided. Do NOT attempt to
+    # reuse the SMTP password as an API key — that produces 401 errors.
+    # Prefer the value exposed on Django settings (populated by python-decouple)
+    # since `.env` is read by settings via `decouple.config`. Fall back to
+    # environment variables if not present on `settings`.
     brevo_key = (
+        getattr(settings, 'BREVO_API_KEY', None) or
         os.environ.get('BREVO_API_KEY') or
         os.environ.get('SENDINBLUE_API_KEY') or
         os.environ.get('SIB_API_KEY')
     )
-    if not brevo_key:
-        email_host = getattr(settings, 'EMAIL_HOST', '').lower()
-        if 'brevo' in email_host or 'sendinblue' in email_host:
-            brevo_key = os.environ.get('EMAIL_HOST_PASSWORD') or getattr(settings, 'EMAIL_HOST_PASSWORD', None)
 
+    # Prepare sender info used by the Brevo API request
+    sender = {
+        'name': os.environ.get('EMAIL_FROM_NAME', 'Baysoko'),
+        'email': os.environ.get('SMTP_ENVELOPE_FROM') or getattr(settings, 'EMAIL_HOST_USER', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+    }
+
+    # Enforce Brevo API usage: if no API key is configured, abort instead
+    # of falling back to SMTP (SMTP relay is unreliable in our environment).
+    if not brevo_key:
+        logger.error('BREVO_API_KEY is not configured; aborting send because Brevo API is required and SMTP fallback is disabled.')
+        raise RuntimeError('BREVO_API_KEY not configured. Email sending via Brevo API is enforced.')
+
+    # Only call the Brevo HTTP API if an explicit API key is configured.
     if brevo_key:
         headers = {
             'accept': 'application/json',
             'api-key': brevo_key,
             'content-type': 'application/json',
         }
-        sender = {
-            'name': os.environ.get('EMAIL_FROM_NAME', 'Baysoko'),
-            'email': os.environ.get('SMTP_ENVELOPE_FROM') or settings.EMAIL_HOST_USER or settings.DEFAULT_FROM_EMAIL
-        }
+        try:
+            masked = (brevo_key[:8] + '...' + brevo_key[-8:]) if brevo_key and len(brevo_key) > 16 else brevo_key
+        except Exception:
+            masked = 'REDACTED'
+        logger.debug('Attempting Brevo API send; api-key=%s, from=%s, to=%s', masked, sender.get('email'), to_emails)
         to = [{'email': email} for email in to_emails]
         payload = {
             'sender': sender,
@@ -57,6 +79,7 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
                     headers=headers,
                     timeout=10
                 )
+                logger.debug('Brevo API responded status=%s', getattr(resp, 'status_code', None))
                 if 200 <= resp.status_code < 300:
                     # Log Brevo response body (contains messageId) for delivery tracing
                     try:
@@ -72,7 +95,10 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
                         err = resp.json()
                     except Exception:
                         err = resp.text
-                    logger.warning('Brevo API returned client error %s: %s', resp.status_code, err)
+                    if resp.status_code == 401:
+                        logger.warning('Brevo API unauthorized (401): %s. Falling back to configured email backend.', err)
+                    else:
+                        logger.warning('Brevo API returned client error %s: %s', resp.status_code, err)
                     break
                 try:
                     err = resp.json()
@@ -93,11 +119,13 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
                 time.sleep(0.8 * attempt)
         logger.warning('Brevo API send failed after %s attempts, falling back to SMTP', attempts)
 
-    # Fallback to SMTP. Force use of SMTP backend (avoid console backend in DEBUG).
+    # Fallback to configured email backend. In development this will use the
+    # console backend if `EMAIL_BACKEND` is set to console, so messages appear
+    # in the developer terminal instead of attempting an SMTP connection.
     envelope_from = os.environ.get('SMTP_ENVELOPE_FROM') or settings.EMAIL_HOST_USER or settings.DEFAULT_FROM_EMAIL
     try:
-        # Force the SMTP backend to ensure an actual SMTP connection is used even in DEBUG
-        connection = get_connection(backend='django.core.mail.backends.smtp.EmailBackend')
+        # Use default connection so Django picks up `settings.EMAIL_BACKEND`.
+        connection = get_connection()
         msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
@@ -110,10 +138,10 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
         msg.send(fail_silently=False)
         logger.info('Email sent via SMTP to %s', to_emails)
     except Exception:
-        logger.exception('SMTP sending failed, trying send_mail as last resort')
+        logger.exception('Email send via default backend failed, trying send_mail fallback')
         try:
-            # Ensure we use a real SMTP connection for the final fallback as well
-            final_conn = get_connection(backend='django.core.mail.backends.smtp.EmailBackend')
+            # Final fallback: use Django's send_mail with default connection
+            final_conn = get_connection()
             send_mail(
                 subject,
                 plain_message,
@@ -151,6 +179,18 @@ def _send_email_threaded(subject, plain_message, html_message, to_emails):
                 logger.exception('Unexpected error when attempting SMS sends after email')
         except Exception:
             logger.exception('Background email send failed')
+
+    # If running in DEBUG or using the console email backend, send synchronously so output
+    # appears in the current process (useful for short-lived manage.py shell runs).
+    try:
+        email_backend = getattr(settings, 'EMAIL_BACKEND', '') or ''
+        if getattr(settings, 'DEBUG', False) or 'console' in email_backend:
+            _send()
+            return
+    except Exception:
+        # If settings are not available for any reason, fall back to threaded send
+        pass
+
     t = threading.Thread(target=_send, daemon=True)
     t.start()
 
@@ -158,4 +198,70 @@ def _send_email_threaded(subject, plain_message, html_message, to_emails):
 def render_and_send(template_html, template_txt, context, subject, to_emails):
     html = render_to_string(template_html, context) if template_html else ''
     plain = render_to_string(template_txt, context) if template_txt else ''
-    _send_email_threaded(subject, plain, html, to_emails)
+    # Prefer Brevo API when an explicit API key is configured; ensure reminders
+    # and other emails use the same provider behavior in dev and prod.
+    # Prefer settings (decouple) before raw environment variables
+    brevo_key = getattr(settings, 'BREVO_API_KEY', None) or os.environ.get('BREVO_API_KEY') or os.environ.get('SENDINBLUE_API_KEY') or os.environ.get('SIB_API_KEY')
+    if not brevo_key:
+        logger.error('BREVO_API_KEY not configured; refusing to send email because Brevo API is enforced.')
+        raise RuntimeError('BREVO_API_KEY not configured. Email sending via Brevo API is enforced.')
+
+    try:
+        # Call send_email_brevo synchronously so caller sees provider behavior immediately
+        send_email_brevo(subject, plain, html, to_emails)
+        return
+    except Exception:
+        logger.exception('Brevo API send failed from render_and_send; aborting send')
+        raise
+
+
+def check_brevo_credentials(timeout=5):
+    """Validate Brevo credentials.
+
+    Returns a dict with 'api' and 'smtp' status info. Does not raise on failure.
+    """
+    results = {'api': {'available': False, 'status': None, 'detail': None},
+               'smtp': {'available': False, 'status': None, 'detail': None}}
+    # Check API key
+    api_key = os.environ.get('BREVO_API_KEY') or os.environ.get('SENDINBLUE_API_KEY') or os.environ.get('SIB_API_KEY')
+    if api_key:
+        try:
+            resp = requests.get('https://api.brevo.com/v3/account', headers={'api-key': api_key}, timeout=timeout)
+            results['api']['status'] = resp.status_code
+            if 200 <= resp.status_code < 300:
+                results['api']['available'] = True
+                try:
+                    results['api']['detail'] = resp.json()
+                except Exception:
+                    results['api']['detail'] = resp.text
+            else:
+                try:
+                    results['api']['detail'] = resp.json()
+                except Exception:
+                    results['api']['detail'] = resp.text
+        except Exception as e:
+            results['api']['detail'] = str(e)
+
+    # Check SMTP
+    smtp_host = getattr(settings, 'EMAIL_HOST', os.environ.get('EMAIL_HOST'))
+    smtp_port = int(getattr(settings, 'EMAIL_PORT', os.environ.get('EMAIL_PORT') or 587))
+    smtp_user = getattr(settings, 'EMAIL_HOST_USER', os.environ.get('EMAIL_HOST_USER'))
+    smtp_pass = getattr(settings, 'EMAIL_HOST_PASSWORD', os.environ.get('EMAIL_HOST_PASSWORD') or os.environ.get('EMAIL_HOST_PASSWORD'))
+    if smtp_host and smtp_user and smtp_pass:
+        import smtplib
+        try:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=timeout)
+            server.ehlo()
+            if smtp_port == 587:
+                server.starttls()
+                server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.quit()
+            results['smtp']['available'] = True
+            results['smtp']['status'] = 'ok'
+        except Exception as e:
+            results['smtp']['detail'] = str(e)
+    else:
+        results['smtp']['detail'] = 'SMTP config incomplete'
+
+    return results

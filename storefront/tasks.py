@@ -22,6 +22,7 @@ def process_scheduled_withdrawals():
 from celery import shared_task
 from django.utils import timezone
 from django.template.loader import render_to_string
+from baysoko.utils.email_helpers import send_email_brevo
 from datetime import timedelta
 import logging
 
@@ -115,20 +116,20 @@ def send_trial_expired_notification(subscription_id):
 
         # Prefer centralized sender
         recipients = [e for e in [getattr(user, 'email', None)] if e]
-        if render_and_send and recipients:
-            try:
-                render_and_send('storefront/emails/trial_expired.html', 'storefront/emails/trial_expired.txt', context, subject, recipients)
-            except Exception:
-                logger.exception('Failed to send trial expired email via centralized sender')
-        else:
-            # Fallback to simple rendering + send_mail if necessary
-            try:
-                html_message = render_to_string('storefront/emails/trial_expired.html', context)
-                text_message = render_to_string('storefront/emails/trial_expired.txt', context)
-                from django.core.mail import send_mail
-                send_mail(subject=subject, message=text_message, from_email='noreply@baysoko.com', recipient_list=[user.email], html_message=html_message, fail_silently=True)
-            except Exception:
-                logger.exception('Fallback trial expired email send failed')
+        # Render templates and send via Brevo API if available, otherwise fallback to configured backend
+        try:
+            html_message = render_to_string('storefront/emails/trial_expired.html', context)
+        except Exception:
+            html_message = ''
+        try:
+            text_message = render_to_string('storefront/emails/trial_expired.txt', context)
+        except Exception:
+            text_message = ''
+
+        try:
+            send_email_brevo(subject, text_message, html_message, recipients)
+        except Exception:
+            logger.exception('Failed to send trial expired email via Brevo API; falling back to default backend')
         # Send SMS notification where possible
         try:
             if NotificationService:
@@ -177,19 +178,19 @@ def send_trial_expiration_reminder(subscription_id, days_before=2):
         }
 
         recipients = [e for e in [getattr(user, 'email', None)] if e]
-        if render_and_send and recipients:
-            try:
-                render_and_send('storefront/emails/trial_reminder.html', 'storefront/emails/trial_reminder.txt', context, subject, recipients)
-            except Exception:
-                logger.exception('Failed to send trial reminder via centralized sender')
-        else:
-            try:
-                html_message = render_to_string('storefront/emails/trial_reminder.html', context)
-                text_message = render_to_string('storefront/emails/trial_reminder.txt', context)
-                from django.core.mail import send_mail
-                send_mail(subject=subject, message=text_message, from_email='noreply@baysoko.com', recipient_list=[user.email], html_message=html_message, fail_silently=True)
-            except Exception:
-                logger.exception('Fallback trial reminder email send failed')
+        # Render and send via Brevo API when possible
+        try:
+            html_message = render_to_string('storefront/emails/trial_reminder.html', context)
+        except Exception:
+            html_message = ''
+        try:
+            text_message = render_to_string('storefront/emails/trial_reminder.txt', context)
+        except Exception:
+            text_message = ''
+        try:
+            send_email_brevo(subject, text_message, html_message, recipients)
+        except Exception:
+            logger.exception('Failed to send trial reminder via Brevo API; falling back to default backend')
 
         # Send SMS where possible
         try:
@@ -204,101 +205,141 @@ def send_trial_expiration_reminder(subscription_id, days_before=2):
         logger.error(f"Error sending trial expiration reminder: {str(e)}")
 
 
-    @shared_task
-    def check_active_subscription_expirations():
-        """Find active subscriptions whose period ended and mark them canceled so
-        the existing subscription post_save signal sends emails and in-app notifications.
-        This should be scheduled to run once daily via Celery beat.
-        """
-        from .models import Subscription
-        from django.utils import timezone
+@shared_task
+def check_active_subscription_expirations():
+    """Find active subscriptions whose period ended and mark them canceled so
+    the existing subscription post_save signal sends emails and in-app notifications.
+    This should be scheduled to run once daily via Celery beat.
+    """
+    from .models import Subscription
+    from django.utils import timezone
 
-        now = timezone.now()
-        expired = Subscription.objects.filter(status='active', current_period_end__lt=now)
-        count = 0
-        for sub in expired:
-            try:
-                sub.status = 'canceled'
-                sub.save()
-                logger.info('Marked subscription %s for store %s as canceled (period ended)', sub.id, getattr(sub.store, 'name', 'unknown'))
-                count += 1
-            except Exception:
-                logger.exception('Failed to mark expired subscription %s', sub.id)
-        return {'expired_marked': count}
+    now = timezone.now()
+    expired = Subscription.objects.filter(status='active', current_period_end__lt=now)
+    count = 0
+    for sub in expired:
+        try:
+            sub.status = 'canceled'
+            sub.save()
+            logger.info('Marked subscription %s for store %s as canceled (period ended)', sub.id, getattr(sub.store, 'name', 'unknown'))
+            count += 1
+        except Exception:
+            logger.exception('Failed to mark expired subscription %s', sub.id)
+    return {'expired_marked': count}
 
 
-    @shared_task
-    def send_weekly_reactivation_reminders():
-        """Send weekly reminders to users with canceled subscriptions to reactivate.
+@shared_task
+def send_weekly_reactivation_reminders():
+    """Send weekly reminders to users with canceled subscriptions to reactivate.
 
-        This runs weekly via Celery beat. It will respect a metadata flag
-        `last_reactivation_reminder` on the Subscription to avoid duplicate weekly messages.
-        """
-        from .models import Subscription
-        from notifications.utils import create_notification
-        from django.utils import timezone
+    This runs weekly via Celery beat. It will respect a metadata flag
+    `last_reactivation_reminder` on the Subscription to avoid duplicate weekly messages.
+    """
+    from .models import Subscription
+    from notifications.utils import create_notification
+    from django.utils import timezone
 
-        now = timezone.now()
-        seven_days_ago = now - timedelta(days=7)
+    now = timezone.now()
+    seven_days_ago = now - timedelta(days=7)
 
-        candidates = Subscription.objects.filter(status='canceled')
-        sent = 0
-        for sub in candidates:
-            try:
-                meta = sub.metadata or {}
-                last = meta.get('last_reactivation_reminder')
-                if last:
-                    try:
-                        last_dt = timezone.datetime.fromisoformat(last)
-                        last_dt = timezone.make_aware(last_dt) if last_dt.tzinfo is None else last_dt
-                    except Exception:
-                        last_dt = None
-                else:
+    candidates = Subscription.objects.filter(status='canceled')
+    sent = 0
+    for sub in candidates:
+        try:
+            meta = sub.metadata or {}
+            last = meta.get('last_reactivation_reminder')
+            if last:
+                try:
+                    last_dt = timezone.datetime.fromisoformat(last)
+                    last_dt = timezone.make_aware(last_dt) if last_dt.tzinfo is None else last_dt
+                except Exception:
                     last_dt = None
+            else:
+                last_dt = None
 
-                # Send if never sent or older than 7 days
-                if not last_dt or last_dt <= seven_days_ago:
-                    user = sub.store.owner
-                    # send in-app
-                    create_notification(
-                        recipient=user,
-                        notification_type='system',
-                        title='Reactivate Your Subscription',
-                        message=f'Your subscription for {sub.store.name} ended. Reactivate now to regain premium features.',
-                        related_object_id=sub.id,
-                        related_content_type='subscription',
-                        action_url=f'/dashboard/store/{sub.store.slug}/subscription/plans/',
-                        action_text='Reactivate'
-                    )
+            # Send if never sent or older than 7 days
+            if not last_dt or last_dt <= seven_days_ago:
+                user = sub.store.owner
+                # send in-app
+                create_notification(
+                    recipient=user,
+                    notification_type='system',
+                    title='Reactivate Your Subscription',
+                    message=f'Your subscription for {sub.store.name} ended. Reactivate now to regain premium features.',
+                    related_object_id=sub.id,
+                    related_content_type='subscription',
+                    action_url=f'/dashboard/store/{sub.store.slug}/subscription/plans/',
+                    action_text='Reactivate'
+                )
 
-                    # send email
-                    subject = f'Reactivate your subscription for {sub.store.name}'
-                    ctx = {'user': user, 'store': sub.store, 'subscription': sub}
-                    try:
-                        if render_and_send and getattr(user, 'email', None):
-                            render_and_send('storefront/emails/reactivation_reminder.html', 'storefront/emails/reactivation_reminder.txt', ctx, subject, [user.email])
-                        else:
-                            html_message = render_to_string('storefront/emails/reactivation_reminder.html', ctx)
-                            text_message = render_to_string('storefront/emails/reactivation_reminder.txt', ctx)
-                            from django.core.mail import send_mail
-                            send_mail(subject=subject, message=text_message, from_email='noreply@baysoko.com', recipient_list=[user.email], html_message=html_message, fail_silently=True)
-                    except Exception:
-                        logger.exception('Failed to send reactivation reminder email')
+                # send email
+                subject = f'Reactivate your subscription for {sub.store.name}'
+                ctx = {'user': user, 'store': sub.store, 'subscription': sub}
+                # Render and send via Brevo API when possible
+                try:
+                    html_message = render_to_string('storefront/emails/reactivation_reminder.html', ctx)
+                except Exception:
+                    html_message = ''
+                try:
+                    text_message = render_to_string('storefront/emails/reactivation_reminder.txt', ctx)
+                except Exception:
+                    text_message = ''
+                try:
+                    send_email_brevo(subject, text_message, html_message, [user.email])
+                except Exception:
+                    logger.exception('Failed to send reactivation reminder via Brevo API; falling back to default backend')
 
-                    # send sms
-                    try:
-                        if NotificationService:
-                            phone = getattr(user, 'phone_number', None)
-                            if phone:
-                                NotificationService().send_sms(phone, f"Your subscription for {sub.store.name} ended. Reactivate now to regain premium features.")
-                    except Exception:
-                        logger.exception('Failed to send reactivation reminder SMS')
+                # send sms
+                try:
+                    if NotificationService:
+                        phone = getattr(user, 'phone_number', None)
+                        if phone:
+                            NotificationService().send_sms(phone, f"Your subscription for {sub.store.name} ended. Reactivate now to regain premium features.")
+                except Exception:
+                    logger.exception('Failed to send reactivation reminder SMS')
 
-                    # update metadata
-                    meta['last_reactivation_reminder'] = timezone.now().isoformat()
-                    Subscription.objects.filter(pk=sub.pk).update(metadata=meta)
-                    sent += 1
-            except Exception:
-                logger.exception('Failed sending weekly reactivation reminder for subscription %s', sub.id)
+                # update metadata
+                meta['last_reactivation_reminder'] = timezone.now().isoformat()
+                Subscription.objects.filter(pk=sub.pk).update(metadata=meta)
+                sent += 1
+        except Exception:
+            logger.exception('Failed sending weekly reactivation reminder for subscription %s', sub.id)
 
-        return {'weekly_reactivation_reminders_sent': sent}
+    return {'weekly_reactivation_reminders_sent': sent}
+
+
+@shared_task
+def trigger_startup_reminders():
+    """Trigger reminder tasks once at worker startup.
+
+    Uses Django cache to ensure this runs only once per deployment (or per cache TTL).
+    """
+    try:
+        from django.core.cache import cache
+        # set a key for 24 hours to avoid duplicate runs
+        cache_key = 'startup_subscription_reminders_sent'
+        added = False
+        try:
+            # cache.add returns True if key was set (didn't exist)
+            added = cache.add(cache_key, '1', timeout=60 * 60 * 24)
+        except Exception:
+            # Fallback: if cache backend not available, attempt to continue but risk duplicates
+            added = True
+
+        if not added:
+            logger.info('Startup reminders already triggered via cache; skipping')
+            return {'triggered': False, 'reason': 'already_triggered'}
+
+        # Trigger existing tasks -> they already handle emailing/SMS/in-app
+        check_trial_expirations.delay()
+        send_weekly_reactivation_reminders.delay()
+        try:
+            check_active_subscription_expirations.delay()
+        except Exception:
+            logger.exception('Failed to trigger check_active_subscription_expirations')
+
+        logger.info('Triggered startup subscription reminder tasks')
+        return {'triggered': True}
+    except Exception:
+        logger.exception('Error triggering startup reminders')
+        return {'triggered': False, 'reason': 'exception'}

@@ -27,6 +27,18 @@ def create_notification(recipient, notification_type, title, message,
             action_url=action_url,
             action_text=action_text
         )
+        # Attempt to broadcast via WebSocket so connected clients see it immediately
+        try:
+            from asgiref.sync import async_to_sync
+            # broadcast_notification_via_websocket is defined later in this module
+            async_to_sync(broadcast_notification_via_websocket)(notification)
+        except Exception:
+            # logger may be defined later; use safe fallback
+            try:
+                logger.debug('WebSocket broadcast failed or channel layer not configured')
+            except Exception:
+                pass
+
         return notification
     return None
 
@@ -45,6 +57,11 @@ class NotificationService:
     @staticmethod
     def send_sms(phone_number, message):
         """Send SMS notification using Africa's Talking or similar service"""
+        # Skip SMS sending entirely when Brevo SMS is disabled in settings.
+        if not getattr(settings, 'BREVO_SMS_ENABLED', False) and not getattr(settings, 'SMS_ENABLED', False):
+            logger.debug('SMS sending skipped: BREVO_SMS_ENABLED and SMS_ENABLED are both False')
+            return False
+
         try:
             # Prefer Brevo if enabled
             if getattr(settings, 'BREVO_SMS_ENABLED', False) and getattr(settings, 'BREVO_API_KEY', None):
@@ -128,13 +145,16 @@ def notify_new_order(seller, buyer, order):
     )
     
     # In-app notification
-    from notifications.models import Notification
-    Notification.objects.create(
-        user=seller,
+    # Create in-app notification and broadcast via websocket
+    create_and_broadcast_notification(
+        recipient=seller,
+        notification_type='new_order',
         title="New Order Received",
         message=f"You have a new order #{order.id} from {buyer.get_full_name() or buyer.username}",
-        notification_type='new_order',
-        data={'order_id': order.id}
+        related_object_id=order.id,
+        related_content_type='order',
+        action_url='',
+        action_text='View Order'
     )
 
 def notify_order_shipped(buyer, seller, order, tracking_number=None):
@@ -248,13 +268,14 @@ def notify_new_review(seller, user, review, listing=None, review_type=None):
         title = f'New Review on {listing.title}' if listing else f'New Review from {user.username}'
         message = f'{user.username} has reviewed {listing.title if listing else "your item"}.'
     
-    notification = Notification.objects.create(
+    notification = create_and_broadcast_notification(
         recipient=seller,
         sender=user,
         notification_type='review',
         title=title,
         message=message,
-        related_object=review
+        related_object_id=getattr(review, 'id', None),
+        related_content_type='review'
     )
     
     # You could also send email notification here if configured
