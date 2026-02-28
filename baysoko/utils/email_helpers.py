@@ -39,7 +39,9 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
     # Prepare sender info used by the Brevo API request
     sender = {
         'name': os.environ.get('EMAIL_FROM_NAME', 'Baysoko'),
-        'email': os.environ.get('SMTP_ENVELOPE_FROM') or getattr(settings, 'EMAIL_HOST_USER', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+        # Allow explicit override for Brevo sender address, otherwise fall back
+        # to a safe Brevo relay address known to be validated for the account.
+        'email': os.environ.get('BREVO_SENDER_EMAIL') or '00peteromondi@10654604.brevosend.com'
     }
 
     # Enforce Brevo API usage: if no API key is configured, abort instead
@@ -119,10 +121,10 @@ def send_email_brevo(subject, plain_message, html_message, to_emails):
                 time.sleep(0.8 * attempt)
         logger.warning('Brevo API send failed after %s attempts, falling back to SMTP', attempts)
 
-    # Fallback to configured email backend. In development this will use the
-    # console backend if `EMAIL_BACKEND` is set to console, so messages appear
-    # in the developer terminal instead of attempting an SMTP connection.
-    envelope_from = os.environ.get('SMTP_ENVELOPE_FROM') or settings.EMAIL_HOST_USER or settings.DEFAULT_FROM_EMAIL
+    # Fallback to configured email backend. Use the Brevo sender address
+    # as envelope-from when available to keep provider headers consistent.
+    envelope_from = os.environ.get('BREVO_SENDER_EMAIL') or os.environ.get('SMTP_ENVELOPE_FROM') or getattr(settings, 'EMAIL_HOST_USER', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+    logger.debug('Using envelope_from=%s for fallback send', envelope_from)
     try:
         # Use default connection so Django picks up `settings.EMAIL_BACKEND`.
         connection = get_connection()
@@ -223,7 +225,7 @@ def check_brevo_credentials(timeout=5):
     results = {'api': {'available': False, 'status': None, 'detail': None},
                'smtp': {'available': False, 'status': None, 'detail': None}}
     # Check API key
-    api_key = os.environ.get('BREVO_API_KEY') or os.environ.get('SENDINBLUE_API_KEY') or os.environ.get('SIB_API_KEY')
+    api_key = getattr(settings, 'BREVO_API_KEY', None) or os.environ.get('BREVO_API_KEY') or os.environ.get('SENDINBLUE_API_KEY') or os.environ.get('SIB_API_KEY')
     if api_key:
         try:
             resp = requests.get('https://api.brevo.com/v3/account', headers={'api-key': api_key}, timeout=timeout)

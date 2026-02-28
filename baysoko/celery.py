@@ -51,6 +51,12 @@ app.conf.update(
     enable_utc=True,
 )
 
+    # Allow development to run tasks synchronously when enabled in settings
+    try:
+        app.conf.task_always_eager = bool(getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False))
+    except Exception:
+        pass
+
 # Periodic tasks (Celery Beat)
 try:
     from celery.schedules import crontab

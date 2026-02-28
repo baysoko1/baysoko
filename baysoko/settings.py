@@ -137,6 +137,9 @@ CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL', '')
 BREVO_API_KEY = config('BREVO_API_KEY', default='')
 BREVO_SMS_SENDER = config('BREVO_SMS_SENDER', default='Baysoko')
 BREVO_SMS_ENABLED = config('BREVO_SMS_ENABLED', default=False, cast=bool)
+BREVO_SENDER_EMAIL = config('BREVO_SENDER_EMAIL', default='')
+BREVO_SENDER_NAME = config('BREVO_SENDER_NAME', default='Baysoko')
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
 
 # Only configure Cloudinary if credentials are provided
 if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:

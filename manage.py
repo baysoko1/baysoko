@@ -2,6 +2,12 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
+try:
+    # Load .env for local development so environment variables are available
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 
 def main():

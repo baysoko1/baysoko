@@ -1,5 +1,11 @@
 # baysoko/asgi.py
 import os
+try:
+    # Ensure .env is loaded when running ASGI server in development
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'baysoko.settings')

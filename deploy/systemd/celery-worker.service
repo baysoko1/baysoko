@@ -1,0 +1,15 @@
+[Unit]
+Description=Celery Worker for Baysoko
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+EnvironmentFile=/path/to/your/project/.env
+WorkingDirectory=/path/to/your/project
+ExecStart=/path/to/venv/bin/celery -A baysoko worker --loglevel=info --concurrency=4
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
