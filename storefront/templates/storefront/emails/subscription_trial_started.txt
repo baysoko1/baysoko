@@ -1,0 +1,9 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your free trial for {{ store.name }} has started. It ends on {{ subscription.trial_ends_at }}.
+
+View trial details:
+{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/
+
+Thanks,
+Baysoko Team

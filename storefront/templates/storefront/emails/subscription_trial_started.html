@@ -1,0 +1,9 @@
+<html>
+  <body>
+    <h1>Your Trial Started</h1>
+    <p>Hi {{ user.get_full_name|default:user.username }},</p>
+    <p>Your free trial for <strong>{{ store.name }}</strong> has started. You have temporary access to premium features until {{ subscription.trial_ends_at }}.</p>
+    <p><a href="{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/">View your trial</a></p>
+    <p>Thanks,<br/>Baysoko Team</p>
+  </body>
+</html>

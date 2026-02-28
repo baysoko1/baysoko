@@ -1,0 +1,7 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your subscription for {{ store.name }} has unpaid invoices. Please settle outstanding payments:
+{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/
+
+Thanks,
+Baysoko Team

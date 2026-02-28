@@ -2,6 +2,11 @@ import os
 import sys
 import importlib
 from django.conf import settings
+from pathlib import Path
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
 
 # Try to import Celery normally; if a local module named 'celery' shadows the
 # installed package, attempt to load the real package from site-packages.
@@ -35,6 +40,15 @@ except Exception:
 
     Celery = getattr(real_celery, 'Celery')
 
+# Load project .env early so Celery and Django settings pick up env vars
+try:
+    if load_dotenv is not None:
+        env_path = Path(__file__).resolve().parents[1] / '.env'
+        if env_path.exists():
+            load_dotenv(env_path)
+except Exception:
+    pass
+
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'baysoko.settings')
 
 app = Celery('baysoko')
@@ -51,11 +65,11 @@ app.conf.update(
     enable_utc=True,
 )
 
-    # Allow development to run tasks synchronously when enabled in settings
-    try:
-        app.conf.task_always_eager = bool(getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False))
-    except Exception:
-        pass
+# Allow development to run tasks synchronously when enabled in settings
+try:
+    app.conf.task_always_eager = bool(getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False))
+except Exception:
+    pass
 
 # Periodic tasks (Celery Beat)
 try:
@@ -97,7 +111,6 @@ except Exception:
 # Trigger a one-off startup reminders run when the worker is ready.
 try:
     from celery.signals import worker_ready
-
     @worker_ready.connect
     def _on_worker_ready(sender, **kwargs):
         """Run startup reminders once when the first worker starts.
@@ -105,10 +118,12 @@ try:
         Uses cache-based guard inside the task itself to avoid duplicates.
         """
         try:
-            # Import and call the trigger task (delay to run in background)
+            # Import and call the trigger task; schedule with a short
+            # countdown so the worker has time to register tasks first.
             from storefront.tasks import trigger_startup_reminders
             try:
-                trigger_startup_reminders.delay()
+                # Use a slightly longer countdown to avoid race conditions
+                trigger_startup_reminders.apply_async(countdown=30)
             except Exception:
                 # As a fallback, call synchronously (best-effort)
                 try:
@@ -117,6 +132,21 @@ try:
                     pass
         except Exception:
             # Do not raise on worker start errors
+            pass
+except Exception:
+    pass
+
+# Ensure child worker processes import task modules on startup so they
+# register task handlers before receiving messages (avoids KeyError).
+try:
+    from celery.signals import worker_process_init
+
+    @worker_process_init.connect
+    def _on_worker_process_init(**kwargs):
+        try:
+            import storefront.tasks  # noqa: F401
+        except Exception:
+            # best-effort; don't crash worker on import errors
             pass
 except Exception:
     pass

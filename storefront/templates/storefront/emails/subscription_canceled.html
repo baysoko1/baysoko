@@ -1,0 +1,10 @@
+<html>
+  <body>
+    <h1>Subscription Canceled</h1>
+    <p>Hi {{ user.get_full_name|default:user.username }},</p>
+    <p>Your subscription for <strong>{{ store.name }}</strong> has been canceled and premium features have been disabled.</p>
+    <p>If this was a mistake you can reactivate from your dashboard.</p>
+    <p><a href="{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/">View subscription</a></p>
+    <p>Thanks,<br/>Baysoko Team</p>
+  </body>
+</html>

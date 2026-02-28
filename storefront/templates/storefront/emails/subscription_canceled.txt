@@ -1,0 +1,9 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your subscription for {{ store.name }} has been canceled and premium features have been disabled.
+
+If this was a mistake you can reactivate from your dashboard:
+{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/
+
+Thanks,
+Baysoko Team

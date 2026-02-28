@@ -576,9 +576,9 @@ class Subscription(models.Model):
         self.status = new_status
 
         now = timezone.now()
+        # Cancellation metadata handling
         if new_status == 'canceled':
             self.canceled_at = now
-            # clear any scheduled period end
             try:
                 self.cancel_at_period_end = False
             except Exception:
@@ -586,10 +586,10 @@ class Subscription(models.Model):
         elif new_status == 'active':
             self.canceled_at = None
 
-        # Save changes before syncing store so FK relations are stable
+        # Persist the status change first
         super(Subscription, self).save()
 
-        # Sync store premium flag: premium if any active or valid trial exists
+        # Update store-level premium flags
         from django.db.models import Q
         now = timezone.now()
         has_active = Subscription.objects.filter(
@@ -597,15 +597,11 @@ class Subscription(models.Model):
         ).filter(
             Q(status='active') | Q(status='trialing', trial_ends_at__gt=now)
         ).exists()
-
         if self.store.is_premium != has_active:
             self.store.is_premium = has_active
             self.store.save(update_fields=['is_premium'])
 
-        # Owner-level sync: if the user has no other active subscriptions across their stores,
-        # downgrade all their stores to free (no premium features). This enforces that a
-        # single active subscription (any plan) covers all stores and active takes precedence
-        # over unpaid/past_due instances.
+        # Owner-level downgrade if no active subscriptions
         try:
             owner = self.store.owner
             owner_has_active = Subscription.objects.filter(
@@ -613,17 +609,93 @@ class Subscription(models.Model):
             ).filter(
                 Q(status='active') | Q(status='trialing', trial_ends_at__gt=now)
             ).exists()
-
             if not owner_has_active:
-                # No active subscriptions for owner -> ensure all stores are downgraded
-                from django.db.models import F
-                owner_stores = self.store.__class__.objects.filter(owner=owner)
-                owner_stores.update(is_premium=False)
+                self.store.__class__.objects.filter(owner=owner).update(is_premium=False)
         except Exception:
-            # Be defensive - do not break status transitions on error
-            logger = logging.getLogger(__name__)
-            logger.exception('Failed to sync owner-level subscription flags')
-    
+            logging.getLogger(__name__).exception('Failed to sync owner-level subscription flags')
+
+        # Notify owner about status changes (best-effort)
+        if old_status != new_status:
+            try:
+                from django.template.loader import render_to_string
+                from notifications.utils import create_notification, NotificationService
+            except Exception:
+                create_notification = None
+                NotificationService = None
+
+            try:
+                from baysoko.utils.email_helpers import send_email_brevo
+            except Exception:
+                send_email_brevo = None
+
+            owner = getattr(self.store, 'owner', None)
+            recipients = [getattr(owner, 'email', None)] if owner and getattr(owner, 'email', None) else []
+
+            def _send_in_app(title, message, action_url=None, action_text='View Subscription'):
+                if create_notification and owner:
+                    try:
+                        create_notification(
+                            recipient=owner,
+                            notification_type='system',
+                            title=title,
+                            message=message,
+                            related_object_id=self.id,
+                            related_content_type='subscription',
+                            action_url=action_url or f'/dashboard/store/{self.store.slug}/subscription/',
+                            action_text=action_text,
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).exception('Failed to create in-app notification: %s', title)
+
+            def _send_email(subject, txt_template, html_template):
+                if not send_email_brevo or not recipients:
+                    return
+                context = {'store': self.store, 'subscription': self, 'user': owner}
+                try:
+                    html_message = render_to_string(html_template, context)
+                except Exception:
+                    html_message = ''
+                try:
+                    text_message = render_to_string(txt_template, context)
+                except Exception:
+                    text_message = ''
+                try:
+                    send_email_brevo(subject, text_message, html_message, recipients)
+                except Exception:
+                    logging.getLogger(__name__).exception('Failed to send email: %s', subject)
+
+            # State-specific notifications
+            if new_status == 'canceled':
+                _send_in_app('Subscription Canceled', f'Your subscription for {self.store.name} has been canceled. Premium features have been disabled.')
+                _send_email(f'Subscription Canceled - {self.store.name}', 'storefront/emails/subscription_canceled.txt', 'storefront/emails/subscription_canceled.html')
+
+            if new_status == 'active':
+                _send_in_app('Subscription Activated', f'Your subscription for {self.store.name} is now active. Enjoy premium features!')
+                _send_email(f'Subscription Activated - {self.store.name}', 'storefront/emails/subscription_activated.txt', 'storefront/emails/subscription_activated.html')
+
+            if new_status == 'trialing' and old_status != 'trialing':
+                _send_in_app('Trial Started', f'Your trial for {self.store.name} has started. You have limited-time access to premium features.')
+                _send_email(f'Your Trial Started - {self.store.name}', 'storefront/emails/subscription_trial_started.txt', 'storefront/emails/subscription_trial_started.html')
+
+            if new_status == 'past_due':
+                _send_in_app('Subscription Past Due', f'Your subscription for {self.store.name} is past due. Please update your payment method to avoid service interruption.')
+                _send_email(f'Subscription Past Due - {self.store.name}', 'storefront/emails/subscription_past_due.txt', 'storefront/emails/subscription_past_due.html')
+
+            if new_status == 'unpaid':
+                _send_in_app('Subscription Unpaid', f'Your subscription for {self.store.name} is unpaid. Please settle outstanding invoices to restore access.')
+                _send_email(f'Subscription Unpaid - {self.store.name}', 'storefront/emails/subscription_unpaid.txt', 'storefront/emails/subscription_unpaid.html')
+
+            # Attempt SMS for critical states
+            try:
+                if NotificationService and owner:
+                    phone = getattr(owner, 'phone_number', None) or getattr(self.store, 'phone', None)
+                    if phone and new_status in ('past_due', 'unpaid', 'canceled'):
+                        try:
+                            NotificationService().send_sms(phone, f'Notice: your subscription for {self.store.name} is {new_status}.')
+                        except Exception:
+                            logging.getLogger(__name__).exception('Failed to send SMS for subscription status change')
+            except Exception:
+                logging.getLogger(__name__).exception('NotificationService not available')
     @classmethod
     def get_store_subscription(cls, store):
         """Get active subscription for store"""

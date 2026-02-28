@@ -1,0 +1,7 @@
+Hi {{ user.get_full_name|default:user.username }},
+
+Your subscription for {{ store.name }} is past due. Please update your payment method to avoid interruption:
+{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/
+
+Thanks,
+Baysoko Team

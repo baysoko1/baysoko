@@ -1,0 +1,9 @@
+<html>
+  <body>
+    <h1>Subscription Past Due</h1>
+    <p>Hi {{ user.get_full_name|default:user.username }},</p>
+    <p>Your subscription for <strong>{{ store.name }}</strong> is past due. Please update your payment method to avoid service interruption.</p>
+    <p><a href="{{ SITE_URL }}dashboard/store/{{ store.slug }}/subscription/">Update payment</a></p>
+    <p>Thanks,<br/>Baysoko Team</p>
+  </body>
+</html>
