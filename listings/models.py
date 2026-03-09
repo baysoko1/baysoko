@@ -237,6 +237,19 @@ class Listing(models.Model):
             percentage = (discount / self.original_price) * 100
             return round(percentage)
         return 0
+
+
+class NewsletterSubscription(models.Model):
+    """Simple model to store newsletter subscriptions from the homepage form."""
+    email = models.EmailField(unique=True)
+    source = models.CharField(max_length=100, blank=True, help_text="Optional source (e.g., homepage)")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Newsletter: {self.email}"
     
     # In the save method of Listing model, add store validation
     def save(self, *args, **kwargs):

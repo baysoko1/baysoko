@@ -23,6 +23,7 @@ from django.views.decorators.http import require_POST
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.utils import timezone
+from django.contrib.staticfiles.storage import staticfiles_storage
 
 from .models import Conversation, Message, MessageAttachment, UserOnlineStatus, AgentChat
 from .forms import MessageForm
@@ -48,22 +49,52 @@ def broadcast_to_user(user_id, event_type, data):
 
 def broadcast_message_created(message, participants):
     """Broadcast a new message to all participants."""
-    
+    from django.conf import settings
+    from django.core.files.storage import default_storage
+
     message_data = {
         'id': message.id,
         'conversation_id': message.conversation_id,
         'sender_id': message.sender_id,
         'sender_name': message.sender.get_full_name() or message.sender.username,
-        'sender_avatar': get_avatar_url_for(message.sender, None),  # you'll need request for full URL, consider passing request or use absolute URI later
+        'sender_avatar': get_avatar_url_for(message.sender, None),
         'content': message.content,
         'timestamp': message.timestamp.isoformat(),
         'is_read': message.is_read,
         'delivered': message.delivered,
-        'attachments': [],  # fill with actual attachments if any
-        'is_own': False,    # will be set client-side
+        'attachments': [],
+        'is_own': False,
         'reply_to_id': message.reply_to_id,
         'is_pinned': message.is_pinned,
     }
+
+    # If the message has attachments, build absolute URLs using SITE_URL when necessary
+    try:
+        site_url = getattr(settings, 'SITE_URL', '') or ''
+        for att in message.attachments.all():
+            try:
+                url = att.file.url if att.file else None
+                # If URL is relative and SITE_URL exists, prefix it to make absolute
+                if url and url.startswith('/') and site_url:
+                    url = site_url.rstrip('/') + url
+                # fallback to default_storage url builder
+                if not url:
+                    try:
+                        url = default_storage.url(att.file.name)
+                    except Exception:
+                        url = None
+                message_data['attachments'].append({
+                    'id': att.id,
+                    'url': url,
+                    'name': getattr(att, 'filename', ''),
+                    'type': getattr(att, 'content_type', ''),
+                    'size': getattr(att, 'size', None),
+                })
+            except Exception:
+                logger.exception('Failed to build attachment URL for attachment %s', getattr(att, 'id', None))
+    except Exception:
+        logger.exception('Failed to enumerate message attachments')
+
     for user_id in participants:
         broadcast_to_user(user_id, 'chat_message', {'message': message_data})
 
@@ -488,7 +519,7 @@ def send_unified_message(request):
                     created_attachments.append({
                         'id': ma.id,
                         'name': ma.filename,
-                        'url': default_storage.url(ma.file.name),
+                        'url': (lambda u, ct: u.replace('/auto/upload/', '/image/upload/') if (u and '/auto/upload/' in u and ct and ct.startswith('image/')) else (u.replace('/auto/upload/', '/raw/upload/') if (u and '/auto/upload/' in u) else u))(default_storage.url(ma.file.name), ma.content_type),
                         'type': ma.content_type,
                         'size': ma.size,
                     })
@@ -773,9 +804,19 @@ class UnifiedConversationView(LoginRequiredMixin, View):
     def _serialize_message(self, msg, current_user, request):
         attachments = []
         for att in msg.attachments.all():
+            try:
+                file_url = request.build_absolute_uri(att.file.url) if att.file else None
+                # Normalize Cloudinary 'auto/upload' paths to the correct resource type
+                if file_url and '/auto/upload/' in file_url:
+                    if att.content_type and att.content_type.startswith('image/'):
+                        file_url = file_url.replace('/auto/upload/', '/image/upload/')
+                    else:
+                        file_url = file_url.replace('/auto/upload/', '/raw/upload/')
+            except Exception:
+                file_url = None
             attachments.append({
                 'id': att.id,
-                'url': request.build_absolute_uri(att.file.url) if att.file else None,
+                'url': file_url,
                 'name': att.filename,
                 'type': att.content_type,
                 'size': att.size,
@@ -832,6 +873,15 @@ def agent_history(request):
                     'meta': e.meta,
                     'timestamp': e.timestamp.isoformat(),
                 } for e in reversed(entries)]
+            if not history:
+                greeting_name = (request.user.first_name or '').strip() or (request.user.username or '').strip() or 'there'
+                history = [{
+                    'id': 'welcome',
+                    'role': 'assistant',
+                    'content': f"Hello {greeting_name}, I am Baysoko Assistant. I can help with your cart, listings, stores, subscriptions, and orders.",
+                    'meta': {'kind': 'welcome'},
+                    'timestamp': timezone.now().isoformat(),
+                }]
             return JsonResponse({'success': True, 'history': history})
 
         if request.method == 'POST':
@@ -1021,13 +1071,44 @@ class SendUnifiedMessageView(LoginRequiredMixin, View):
         conversation.updated_at = timezone.now()
         conversation.save(update_fields=['updated_at'])
         
-
-        return JsonResponse({
+        response_payload = {
             'success': True,
             'message_id': message.id,
             'conversation_id': conversation.id,
             'message': self._serialize_message(message, user, request, attachments_data)
-        })
+        }
+
+        # If user is chatting with assistant bot in inbox, auto-generate a reply.
+        try:
+            bot_username = getattr(settings, 'AGENT_BOT_USERNAME', 'assistant-bot')
+            is_assistant_chat = bool(other and other.username == bot_username and user.id != other.id)
+            user_text = (content or '').strip()
+            if is_assistant_chat and user_text:
+                from listings.ai_assistant import assistant_reply
+                recent_msgs = Message.objects.filter(conversation=conversation).order_by('-timestamp')[:40]
+                history = []
+                for m in reversed(list(recent_msgs)):
+                    history.append({
+                        'role': 'user' if m.sender_id == user.id else 'assistant',
+                        'content': m.content,
+                    })
+                ai = assistant_reply(user_text, context=history, user_id=user.id)
+                ai_content = json.dumps(ai or {'text': 'Assistant unavailable right now.', 'platform_items': []})
+                bot_msg = Message.objects.create(
+                    conversation=conversation,
+                    sender=other,
+                    content=ai_content,
+                    delivered=True,
+                    is_read=False,
+                )
+                conversation.updated_at = timezone.now()
+                conversation.save(update_fields=['updated_at'])
+                broadcast_message_created(bot_msg, [user.id, other.id])
+                response_payload['assistant_message'] = self._serialize_message(bot_msg, user, request)
+        except Exception:
+            logger.exception('Failed to generate assistant auto-reply in unified chat')
+
+        return JsonResponse(response_payload)
 
     def _serialize_message(self, msg, current_user, request, extra_attachments=None):
         attachments = extra_attachments if extra_attachments is not None else []

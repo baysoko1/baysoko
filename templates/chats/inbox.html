@@ -29,6 +29,115 @@
     .preview-item .remove-attachment i { font-size:1rem; }
     .preview-item .file-icon { display:flex; align-items:center; justify-content:center; width:100%; height:100%; background:var(--bg-secondary); }
 
+    /* Assistant rich messages rendered inside chat bubbles */
+    .message-bubble .agent-desc { display: grid; gap: 6px; }
+    .message-bubble .agent-formatted-paragraph { margin: 0; line-height: 1.5; }
+    .message-bubble .agent-formatted-list { margin: 0; padding-left: 1rem; }
+    .message-bubble .agent-formatted-list li + li { margin-top: 4px; }
+
+    .message-bubble .agent-suggestions {
+        margin-top: 8px;
+        border-top: 1px dashed var(--border-color);
+        padding-top: 8px;
+    }
+    .message-bubble .agent-suggestions > strong {
+        display: block;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+    }
+    .message-bubble .agent-suggestions ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+    }
+    .message-bubble .agent-suggestions li {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 8px;
+        max-width: 100%;
+        overflow: hidden;
+    }
+    .message-bubble .agent-suggestion-image {
+        width: 44px;
+        height: 44px;
+        border-radius: 8px;
+        object-fit: cover;
+        flex-shrink: 0;
+        border: 1px solid var(--border-color);
+    }
+    .message-bubble .agent-suggestion-info {
+        min-width: 0;
+        flex: 1;
+    }
+    .message-bubble .agent-suggestion-title {
+        font-weight: 700;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .message-bubble .agent-suggestion-meta {
+        margin-top: 4px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    .message-bubble .agent-suggestion-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 999px;
+        padding: 2px 8px;
+        max-width: 100%;
+    }
+    .message-bubble .agent-suggestion-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .message-bubble .agent-action-link,
+    .message-bubble .agent-action-add {
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-size: 0.72rem;
+        white-space: nowrap;
+        text-decoration: none;
+        border: 1px solid var(--border-color);
+    }
+    .message-bubble .agent-action-link { color: var(--text-primary); background: var(--bg-primary); }
+    .message-bubble .agent-action-add { color: #fff; background: var(--primary); border-color: var(--primary); }
+
+    @media (max-width: 576px) {
+        .message-bubble .agent-suggestions li {
+            flex-wrap: wrap;
+        }
+        .message-bubble .agent-suggestion-actions {
+            width: 100%;
+            flex-direction: row;
+            justify-content: flex-end;
+        }
+    }
+
+    /* Assistant rich content readability in inbox */
+    .agent-desc { display: grid; gap: 6px; }
+    .agent-formatted-paragraph { margin: 0; line-height: 1.5; }
+    .agent-formatted-list { margin: 0; padding-left: 18px; }
+    .agent-formatted-list li + li { margin-top: 4px; }
+    .agent-suggestion-image { object-fit: cover; }
+
     /* Hide global navigation elements in chat view */
     body.chat-active .main-nav,
     body.chat-active .bottom-nav,
@@ -657,6 +766,20 @@
 
     .message-group.received {
         align-self: flex-start;
+    }
+    .message-group.received.assistant-enter .message-bubble {
+        animation: inbox-assistant-enter 0.34s cubic-bezier(.22,.9,.22,1);
+        transform-origin: left bottom;
+    }
+    @keyframes inbox-assistant-enter {
+        0% {
+            opacity: 0;
+            transform: translateY(12px) scale(0.98);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
     }
 
     .message-bubble {
@@ -1290,6 +1413,18 @@
         100% { background-position: -200% 0; }
     }
 
+    .agent-inline-link {
+        color: var(--primary);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        font-weight: 600;
+        word-break: break-all;
+    }
+
+    .agent-inline-link:hover {
+        color: var(--primary-hover);
+    }
+
     /* ===== MODAL STYLES ===== */
     .modal-overlay {
         position: fixed;
@@ -1845,6 +1980,8 @@
                                 <div class="participant-status" id="participantStatusContainer">
                                     <span class="status-dot" id="statusDot"></span>
                                     <span id="participantStatus">Tap to start messaging</span>
+                                    <!-- Assistant online indicator -->
+                                    <span id="assistantOnline" style="display:none;margin-left:8px;padding:4px 8px;border-radius:12px;background:var(--accent);color:white;font-size:0.8rem;">Assistant online</span>
                                 </div>
                             </div>
                         </div>
@@ -2027,6 +2164,8 @@ let otherTypingName = '';
 let tempIdCounter = 0;
 let galleryImages = [];
 let galleryIndex = 0;
+let lastAssistantPromptContext = '';
+let incomingAnimatedMessageIds = new Set();
 
 // Map tempFileId -> objectURL for optimistic previews
 const tempFileMap = new Map();
@@ -2271,6 +2410,215 @@ function cloudinaryToLocalUrl(cloudinaryUrl) {
     return null;
 }
 
+function extractAssistantPreview(content) {
+    let preview = String(content || '').trim();
+    if (!preview) return 'Start conversation';
+    try {
+        let parsed = null;
+        if (preview.startsWith('{') || preview.startsWith('[') || preview.startsWith('"')) {
+            parsed = JSON.parse(preview);
+            if (typeof parsed === 'string') {
+                const nested = String(parsed || '').trim();
+                if (nested.startsWith('{') || nested.startsWith('[')) {
+                    try { parsed = JSON.parse(nested); } catch (e) {}
+                } else {
+                    preview = nested;
+                }
+            }
+        }
+        if (parsed && typeof parsed === 'object') {
+            preview = String(parsed?.text || parsed?.description || '').trim() || preview;
+        }
+    } catch (e) {
+        const m = preview.match(/"text"\s*:\s*"([^"]+)"/i) || preview.match(/"description"\s*:\s*"([^"]+)"/i);
+        if (m && m[1]) preview = m[1];
+    }
+    preview = preview
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+        .replace(/^[`'"]+|[`'"]+$/g, '')
+        .replace(/[*_`>#-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (preview.length > 96) preview = preview.slice(0, 93) + '...';
+    return preview || 'Start conversation';
+}
+
+function normalizeMediaVersionPath(url) {
+    if (!url || typeof url !== 'string') return null;
+    const m = url.match(/^\/media\/v\d+\/(.+)$/i);
+    if (m && m[1]) return '/media/' + m[1];
+    return null;
+}
+
+function toAbsoluteUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    if (/^https?:\/\//i.test(url)) return ensureHttps(url);
+    if (url.startsWith('/')) return window.location.origin + url;
+    return null;
+}
+
+function uniqueStrings(values) {
+    const out = [];
+    const seen = new Set();
+    (values || []).forEach(v => {
+        if (!v || typeof v !== 'string') return;
+        const key = v.trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        out.push(key);
+    });
+    return out;
+}
+
+function parseJsonObject(value) {
+    if (!value || typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return null;
+    try { return JSON.parse(trimmed); } catch (e) { return null; }
+}
+
+function getImageCandidates(rawUrl, extraUrl) {
+    const cands = [];
+    const raw = rawUrl || '';
+    if (raw) {
+        const absRaw = toAbsoluteUrl(raw) || ensureHttps(raw);
+        if (absRaw) cands.push(absRaw);
+        if (typeof raw === 'string' && raw.startsWith('/')) {
+            const normalized = normalizeMediaVersionPath(raw);
+            const absNormalized = normalized ? toAbsoluteUrl(normalized) : null;
+            if (absNormalized) cands.push(absNormalized);
+        }
+        const localFromCloudinary = cloudinaryToLocalUrl(raw);
+        const absLocal = localFromCloudinary ? (toAbsoluteUrl(localFromCloudinary) || ensureHttps(localFromCloudinary)) : null;
+        if (absLocal) cands.push(absLocal);
+    }
+    if (extraUrl) cands.push(ensureHttps(extraUrl));
+    cands.push('/static/images/placeholder.png');
+    return uniqueStrings(cands);
+}
+
+function hasRemoteMediaCandidate(candidates) {
+    return (candidates || []).some(c => /^https?:\/\//i.test(c) || (typeof c === 'string' && c.startsWith('/media/')));
+}
+
+function extractTerms(text) {
+    if (!text) return [];
+    return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length > 2);
+}
+
+function isRelevantAssistantItem(item, contextTerms, contextText) {
+    const title = String(item.title || item.name || item.store_name || '').toLowerCase().trim();
+    if (!title) return false;
+    if (contextText.includes(title)) return true;
+    const itemTerms = extractTerms(title);
+    if (!itemTerms.length) return false;
+    return itemTerms.some(t => contextTerms.includes(t));
+}
+
+function compactAssistantSuggestionReason(item) {
+    if (!item || typeof item !== 'object') return '';
+    if (item.type === 'action_suggestion') return '';
+    const raw = String(item.reason || item.suggestion_reason || '').trim();
+    if (!raw) return '';
+    const clean = raw.replace(/\s+/g, ' ').replace(/[.;:,!?]+$/g, '');
+    return clean.length > 56 ? (clean.slice(0, 55) + '…') : clean;
+}
+
+function normalizeAssistantHref(href) {
+    const raw = String(href || '').trim();
+    if (!raw) return null;
+    if (raw === '/cart/') return '/listings/cart/';
+    if (raw === '/checkout/') return '/listings/checkout/';
+    if (raw === '/orders/') return '/listings/orders/';
+    if (raw.startsWith('/')) return raw;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (/^www\./i.test(raw)) return 'https://' + raw;
+    return null;
+}
+
+function linkifyEscapedAssistantText(text) {
+    const urlRe = /((https?:\/\/|www\.)[^\s<]+)/gi;
+    return String(text || '').replace(urlRe, (m) => {
+        let href = m;
+        if (!/^https?:\/\//i.test(href)) href = 'https://' + href;
+        return `<a class="agent-inline-link" href="${href}" target="_blank" rel="noopener noreferrer">${m}</a>`;
+    });
+}
+
+function syncCartStateFromAssistantPayload(payload) {
+    try {
+        if (!payload || typeof payload !== 'object') return;
+        let count = null;
+        let total = null;
+        const items = Array.isArray(payload.platform_items || payload.items) ? (payload.platform_items || payload.items) : [];
+        items.forEach(it => {
+            if (!it || typeof it !== 'object') return;
+            if (it.cart_item_count !== undefined && it.cart_item_count !== null) count = Number(it.cart_item_count);
+            if (it.cart_total !== undefined && it.cart_total !== null) total = Number(it.cart_total);
+        });
+        if (count === null && payload.cart_item_count !== undefined) count = Number(payload.cart_item_count);
+        if (total === null && payload.cart_total !== undefined) total = Number(payload.cart_total);
+        if (Number.isFinite(count) || Number.isFinite(total)) {
+            document.dispatchEvent(new CustomEvent('cartUpdated', {
+                detail: {
+                    itemCount: Number.isFinite(count) ? count : undefined,
+                    total: Number.isFinite(total) ? total : undefined,
+                }
+            }));
+        }
+    } catch (e) {}
+}
+
+function filterRelevantAssistantItems(items, text, promptContext) {
+    if (!Array.isArray(items) || !items.length) return [];
+    const contextText = `${text || ''} ${promptContext || ''}`.toLowerCase();
+    const terms = extractTerms(contextText);
+    const actionItems = items.filter(it => it && it.type === 'action_suggestion');
+    const relevant = items.filter(it => isRelevantAssistantItem(it || {}, terms, contextText));
+    if (relevant.length) return [...relevant, ...actionItems].slice(0, 6);
+
+    if (/\b(subscription|subscriptions|plan|plans|billing|renew|upgrade|downgrade|cancel subscription|payment option)\b/.test(contextText)) {
+        return [...items.filter(it => it && ['subscription', 'subscription_plan', 'store'].includes(it.type)), ...actionItems].slice(0, 6);
+    }
+    if (/\b(order|orders|track|delivery)\b/.test(contextText)) {
+        return [...items.filter(it => it && it.type === 'order'), ...actionItems].slice(0, 6);
+    }
+    if (/\b(store|stores|seller|shop)\b/.test(contextText)) {
+        return [...items.filter(it => it && it.type === 'store'), ...actionItems].slice(0, 6);
+    }
+    if (/\b(cart|checkout)\b/.test(contextText)) {
+        return [...items.filter(it => it && (it.type === 'cart' || it.type === 'cart_item')), ...actionItems].slice(0, 6);
+    }
+    if (/\b(arrival|arrivals|listing|listings|item|items|featured|product|products)\b/.test(contextText)) {
+        return [...items.filter(it => it && (it.type === 'listing' || it.type === 'favorite')), ...actionItems].slice(0, 6);
+    }
+    return actionItems.slice(0, 4);
+}
+
+function formatAssistantText(text) {
+    let safe = escapeHtml(String(text || '')).trim();
+    if (!safe) return '';
+    safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    safe = safe.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) => {
+        const normalized = normalizeAssistantHref(href);
+        if (!normalized) return `${label} (${href})`;
+        const external = /^https?:\/\//i.test(normalized);
+        const target = external ? ' target="_blank" rel="noopener noreferrer"' : '';
+        return `<a class="agent-inline-link" href="${escapeHtml(normalized)}"${target}>${label}</a>`;
+    });
+    safe = linkifyEscapedAssistantText(safe);
+    const blocks = safe.split(/\n\s*\n/);
+    return blocks.map(block => {
+        const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+        if (!lines.length) return '';
+        const isBullets = lines.every(l => /^[-*]\s+/.test(l));
+        if (isBullets) {
+            return '<ul class="agent-formatted-list">' + lines.map(l => '<li>' + l.replace(/^[-*]\s+/, '') + '</li>').join('') + '</ul>';
+        }
+        return '<p class="agent-formatted-paragraph">' + lines.join('<br>') + '</p>';
+    }).join('');
+}
+
 // ========== ONLINE USERS ==========
 async function loadOnlineUsers() {
     try {
@@ -2468,14 +2816,7 @@ function renderGroupedConversations(groups) {
         const isOnline = onlineUsers.has(g.participant_id);
         const lastTime = g.last_message_time ? formatCompactTime(g.last_message_time) : '';
         const isOwn = g.last_message_sender_id === window.currentUserId;
-        let preview = g.last_message_content || 'Start conversation';
-        // If preview is structured JSON from assistant, prefer the text/description
-        try {
-            if (preview && (preview.trim().startsWith('{') || preview.trim().startsWith('['))) {
-                const p = JSON.parse(preview);
-                if (p) preview = p.text || p.description || (Array.isArray(p.platform_items) && p.platform_items.length ? (p.platform_items[0].title || p.platform_items[0].name || '') : preview);
-            }
-        } catch (e) { /* ignore */ }
+        let preview = extractAssistantPreview(g.last_message_content || 'Start conversation');
         const avatar = g.participant_avatar || 'https://placehold.co/200x200/c2c2c2/1f1f1f?text=User';
         // Detect assistant/system participant – show only if there is actual content or unread messages
         const isAssistantParticipant = (g.is_assistant === true) || (/assistant/i.test(String(g.participant_name || ''))) || (g.participant_role === 'assistant');
@@ -2695,6 +3036,8 @@ function updateParticipantUnreadInSidebar(participantId, newUnreadCount) {
 async function fetchUnifiedMessages(participantId) {
     if (isLoadingMessages) return;
     isLoadingMessages = true;
+    const spinner = document.getElementById('chatLoadingSpinner');
+    if (spinner) spinner.style.display = 'flex';
     try {
         const baseUrl = `/chats/api/unified-conversation/${participantId}/`;
         const url = (lastMessageId && lastMessageId > 0) ? `${baseUrl}?last_id=${lastMessageId}` : baseUrl;
@@ -2710,6 +3053,11 @@ async function fetchUnifiedMessages(participantId) {
             } else {
                 const newMsgs = data.messages.filter(m => m.id > lastMessageId);
                 if (newMsgs.length) {
+                    newMsgs.forEach((m) => {
+                        const msgId = m && m.id !== undefined && m.id !== null ? String(m.id) : '';
+                        const isIncoming = m && (m.sender_id !== window.currentUserId) && !m.is_own;
+                        if (msgId && isIncoming) incomingAnimatedMessageIds.add(msgId);
+                    });
                     allMessages.push(...newMsgs);
                     lastMessageId = Math.max(...newMsgs.map(m => m.id));
                     try { loadGroupedConversations(); updateTotalUnreadCount(); } catch (e) { console.warn('refresh grouped convs failed', e); }
@@ -2741,6 +3089,7 @@ async function fetchUnifiedMessages(participantId) {
         }
     } finally {
         isLoadingMessages = false;
+        if (spinner) spinner.style.display = 'none';
     }
 }
 
@@ -2797,6 +3146,10 @@ function renderMessages() {
 
 function renderMessageBubble(msg) {
     const isOwn = msg.sender_id === window.currentUserId || msg.is_own;
+    const msgKey = msg.id !== undefined && msg.id !== null ? String(msg.id) : (msg.tempId ? String(msg.tempId) : '');
+    const shouldAnimateIncoming = !isOwn && !!msgKey && incomingAnimatedMessageIds.has(msgKey);
+    if (shouldAnimateIncoming) incomingAnimatedMessageIds.delete(msgKey);
+    const groupClasses = `message-group ${isOwn ? 'sent' : 'received'}${shouldAnimateIncoming ? ' assistant-enter' : ''}`;
     const time = formatTime(msg.timestamp);
     let readIcon = '';
     if (isOwn && !msg.tempId) {
@@ -2838,6 +3191,10 @@ function renderMessageBubble(msg) {
                     imgSrc = tempFileMap.get(att.tempFileId);
                 }
 
+                const primaryMedia = att.url || att.file_url || att.thumbnail || att.preview_url || '';
+                const imageCandidates = getImageCandidates(primaryMedia, tempBlobUrl || '');
+                if (!imgSrc && imageCandidates.length) imgSrc = imageCandidates[0];
+
                 // If still no source, show a placeholder
                 const loadingOverlay = !imgSrc && !msg.tempId ? `<div class="attachment-overlay"><div class="spinner-border text-light" role="status" aria-hidden="true"></div></div>` : '';
 
@@ -2845,10 +3202,11 @@ function renderMessageBubble(msg) {
                 const safeFileUrl = fileUrl ? fileUrl.replace(/'/g, "\\'") : '';
                 const safeFileName = fileName ? fileName.replace(/'/g, "\\'") : '';
                 const safeTempBlobUrl = tempBlobUrl ? tempBlobUrl.replace(/'/g, "\\'") : '';
-                const onErrorHandler = `this.onerror=null; tryLoadLocalImage(this, '${safeFileUrl}', '${safeFileName}', ${attIdx}, '${safeTempBlobUrl}')`;
+                const safeCandidates = escapeHtml(JSON.stringify(imageCandidates)).replace(/'/g, '&#039;');
+                const onErrorHandler = `this.onerror=null; tryLoadLocalImage(this, '${safeFileUrl}', '${safeFileName}', ${attIdx}, '${safeTempBlobUrl}', '${safeCandidates}')`;
 
                 attachmentsHtml += `<div class="attachment-item" data-attachment="${encoded}" onclick="showAttachmentViewerInline(this)">
-                    <div class="attachment-preview">${imgSrc ? `<img src="${ensureHttps(imgSrc)}" alt="${escapeHtml(fileName)}" onerror="${onErrorHandler}">` : `<img src="" alt="${escapeHtml(fileName)}" class="loading">`}</div>
+                    <div class="attachment-preview">${imgSrc ? `<img src="${ensureHttps(imgSrc)}" alt="${escapeHtml(fileName)}" data-fallback-index="0" data-fallback-retry-round="0" data-fallbacks='${safeCandidates}' onerror="${onErrorHandler}">` : `<img src="" alt="${escapeHtml(fileName)}" class="loading">`}</div>
                     ${loadingOverlay}
                     <div class="attachment-info">${escapeHtml(fileName)}</div>
                 </div>`;
@@ -2903,7 +3261,7 @@ function renderMessageBubble(msg) {
         if (msg.content && typeof msg.content === 'object') {
             contentHtml = formatStructuredMessage(msg.content);
         } else if (msg.content && (String(msg.content).trim().startsWith('{') || String(msg.content).trim().startsWith('['))) {
-            const parsed = JSON.parse(String(msg.content));
+            const parsed = parseJsonObject(String(msg.content));
             if (parsed && typeof parsed === 'object') {
                 contentHtml = formatStructuredMessage(parsed);
             } else {
@@ -2917,7 +3275,7 @@ function renderMessageBubble(msg) {
     }
 
     return `
-    <div class="message-group ${isOwn ? 'sent' : 'received'}" data-message-id="${msg.id || msg.tempId}">
+    <div class="${groupClasses}" data-message-id="${msg.id || msg.tempId}">
         <div class="message-bubble ${isOwn ? 'sent' : 'received'} ${selectedClass} ${statusClass}">
             ${replyHtml}
             <div class="message-content">${contentHtml} ${extraContent}</div>
@@ -2939,49 +3297,68 @@ function renderMessageBubble(msg) {
 
 // Render structured assistant messages similarly to agent widget
 function formatStructuredMessage(d) {
+    if (!d || typeof d !== 'object') {
+        return '<div>' + escapeHtml(String(d || '')) + '</div>';
+    }
+    if (typeof d.text === 'string') {
+        const nested = parseJsonObject(d.text);
+        if (nested && typeof nested === 'object') {
+            d = Object.assign({}, d, nested);
+        }
+    }
+    syncCartStateFromAssistantPayload(d);
     let html = '';
-    if (d.text) html += '<div class="agent-desc">' + escapeHtml(d.text) + '</div>';
-    else if (d.description) html += '<div class="agent-desc">' + escapeHtml(d.description) + '</div>';
+    if (d.text) html += '<div class="agent-desc">' + formatAssistantText(d.text) + '</div>';
+    else if (d.description) html += '<div class="agent-desc">' + formatAssistantText(d.description) + '</div>';
     if (d.key_features && Array.isArray(d.key_features)) {
         html += '<ul class="agent-features">' + d.key_features.map(f => '<li>' + escapeHtml(f) + '</li>').join('') + '</ul>';
     }
     if (d.category) html += '<div class="agent-meta"><strong>Category:</strong> ' + escapeHtml(d.category) + '</div>';
-    const items = d.platform_items || d.items || [];
+    const items = filterRelevantAssistantItems((d.platform_items || d.items || []), d.text || d.description || '', lastAssistantPromptContext);
     if (items.length) {
         html += '<div class="agent-suggestions"><strong>Suggestions:</strong><ul>';
         items.forEach(it => {
-            let imgUrl = it.image || it.image_url || it.avatar || null;
-            if (imgUrl) {
-                imgUrl = ensureHttps(imgUrl);
-                const localUrl = cloudinaryToLocalUrl(imgUrl);
-                if (localUrl) imgUrl = localUrl;
-            } else {
-                imgUrl = '/static/images/placeholder.png';
-            }
+            const imageCandidates = getImageCandidates(it.image || it.image_url || it.avatar || it.logo || it.store_logo || it.store_image || it.cover_image || '', '');
+            const imgUrl = imageCandidates[0] || '/static/images/placeholder.png';
+            const safeCandidates = escapeHtml(JSON.stringify(imageCandidates)).replace(/'/g, '&#039;');
             let metaHtml = '';
             let actionsHtml = '';
+            const compactReason = compactAssistantSuggestionReason(it);
             if (it.type === 'listing' || it.type === 'cart_item') {
                 if (it.price) metaHtml += `<span class="agent-suggestion-price">${escapeHtml(it.price)}</span>`;
                 if (it.location) metaHtml += `<span class="agent-suggestion-location"><i class="bi bi-geo-alt"></i> ${escapeHtml(it.location)}</span>`;
                 if (it.seller) metaHtml += `<span><i class="bi bi-person"></i> ${escapeHtml(it.seller)}</span>`;
                 if (it.quantity) metaHtml += `<span><i class="bi bi-box"></i> Qty: ${escapeHtml(String(it.quantity))}</span>`;
-                actionsHtml = ` <a href="${it.url || '#'}" class="agent-action-link" target="_blank">View</a> ${it.id ? '<button class="agent-action-add" onclick="window.agentAddToCart(' + it.id + ')">Add to cart</button>' : ''}`;
+                if (compactReason) metaHtml += `<span><i class="bi bi-lightbulb"></i> ${escapeHtml(compactReason)}</span>`;
+                const removeId = it.cart_item_id || it.id || '';
+                const removeBtn = (it.type === 'cart_item' && removeId) ? `<button class="agent-action-link" onclick="window.agentRemoveFromCart('${escapeHtml(String(removeId))}')">Remove</button>` : '';
+                actionsHtml = ` <a href="${it.url || '#'}" class="agent-action-link" target="_blank">View</a> ${it.id ? '<button class="agent-action-add" onclick="window.agentAddToCart(' + it.id + ')">Add</button>' : ''} ${removeBtn}`;
             } else if (it.type === 'store') {
                 metaHtml += `<span><i class="bi bi-shop"></i> ${escapeHtml(it.owner || '')}</span>`;
                 if (it.is_premium) metaHtml += `<span class="badge premium">Premium</span>`;
                 if (it.subscription_status) metaHtml += `<span>${escapeHtml(it.subscription_status)}</span>`;
+                if (compactReason) metaHtml += `<span><i class="bi bi-lightbulb"></i> ${escapeHtml(compactReason)}</span>`;
                 actionsHtml = `<a href="${it.url || '#'}" class="agent-action-link" target="_blank">Visit store</a>`;
             } else if (it.type === 'order') {
                 metaHtml += `<span><i class="bi bi-truck"></i> Status: ${escapeHtml(it.status)}</span>`;
                 metaHtml += `<span><i class="bi bi-currency-dollar"></i> Total: ${escapeHtml(it.total)}</span>`;
                 if (it.items_preview) metaHtml += `<span>${escapeHtml(it.items_preview)}</span>`;
+                if (compactReason) metaHtml += `<span><i class="bi bi-lightbulb"></i> ${escapeHtml(compactReason)}</span>`;
                 actionsHtml = it.url ? `<a href="${it.url}" class="agent-action-link" target="_blank">View order</a>` : '';
+            } else if (it.type === 'subscription' || it.type === 'subscription_plan') {
+                if (it.plan) metaHtml += `<span><i class="bi bi-stars"></i> ${escapeHtml(it.plan)}</span>`;
+                if (it.price) metaHtml += `<span class="agent-suggestion-price">${escapeHtml(it.price)}</span>`;
+                if (it.status) metaHtml += `<span><i class="bi bi-info-circle"></i> ${escapeHtml(it.status)}</span>`;
+                if (compactReason) metaHtml += `<span><i class="bi bi-lightbulb"></i> ${escapeHtml(compactReason)}</span>`;
+                actionsHtml = it.url ? `<a href="${it.url}" class="agent-action-link" target="_blank">Manage</a>` : '';
+            } else if (it.type === 'action_suggestion') {
+                actionsHtml = it.url ? `<a href="${it.url}" class="agent-action-link" target="_blank">Open</a>` : '';
             }
             html += `
             <li data-item-id="${escapeHtml(String(it.id || ''))}" data-item-type="${escapeHtml(it.type || '')}">
-              <img src="${escapeHtml(imgUrl)}" class="agent-suggestion-image" alt="" onerror="this.onerror=null; this.src='/static/images/placeholder.png';">
+              <img src="${escapeHtml(imgUrl)}" class="agent-suggestion-image" alt="" data-fallback-index="0" data-fallbacks='${safeCandidates}' onerror="this.onerror=null; window.trySuggestionImageFallback(this);">
               <div class="agent-suggestion-info">
-                <div class="agent-suggestion-title">${escapeHtml(it.name || it.title || '')}</div>
+                <div class="agent-suggestion-title">${escapeHtml(it.name || it.title || it.store_name || 'Suggestion')}</div>
                 <div class="agent-suggestion-meta">${metaHtml}</div>
               </div>
               <div class="agent-suggestion-actions">${actionsHtml}</div>
@@ -2996,12 +3373,49 @@ function formatStructuredMessage(d) {
  * Global error handler for images: tries to load a local version from Cloudinary URL,
  * then falls back to the temporary blob URL if available.
  */
-window.tryLoadLocalImage = function(imgElement, originalUrl, fileName, attIdx, tempBlobUrl) {
+window.tryLoadLocalImage = function(imgElement, originalUrl, fileName, attIdx, tempBlobUrl, fallbackCandidatesJson) {
     originalUrl = originalUrl || '';
     fileName = fileName || 'Attachment';
     tempBlobUrl = tempBlobUrl || '';
+    fallbackCandidatesJson = fallbackCandidatesJson || '';
 
-    // If we already attempted fallback, show placeholder with retry
+    let candidates = [];
+    try {
+        candidates = fallbackCandidatesJson ? JSON.parse(fallbackCandidatesJson) : [];
+    } catch (e) {
+        candidates = [];
+    }
+    if (!candidates.length) {
+        candidates = getImageCandidates(originalUrl, tempBlobUrl);
+    }
+    const currentSrc = imgElement && imgElement.src ? imgElement.src : '';
+    candidates = uniqueStrings(candidates.filter(c => c !== currentSrc));
+
+    const idx = parseInt(imgElement.dataset.fallbackIndex || '-1', 10);
+    const nextIdx = Number.isNaN(idx) ? 0 : (idx + 1);
+    if (candidates[nextIdx]) {
+        imgElement.dataset.fallbackIndex = String(nextIdx);
+        imgElement.dataset.fallbacks = JSON.stringify(candidates);
+        imgElement.src = candidates[nextIdx];
+        return;
+    }
+
+    const retryRound = parseInt(imgElement.dataset.fallbackRetryRound || '0', 10);
+    const normalizedRetryRound = Number.isNaN(retryRound) ? 0 : retryRound;
+    if (hasRemoteMediaCandidate(candidates) && normalizedRetryRound < 4) {
+        imgElement.dataset.fallbackRetryRound = String(normalizedRetryRound + 1);
+        const retryCandidate = candidates.find(c => /^https?:\/\//i.test(c) || (typeof c === 'string' && c.startsWith('/media/')));
+        if (retryCandidate) {
+            setTimeout(() => {
+                try {
+                    const bust = retryCandidate.includes('?') ? '&' : '?';
+                    imgElement.src = `${retryCandidate}${bust}retry=${Date.now()}`;
+                } catch (e) {}
+            }, 1200 * (normalizedRetryRound + 1));
+            return;
+        }
+    }
+
     if (imgElement.dataset.fallbackAttempted === 'true') {
         const container = imgElement.closest('.attachment-item');
         if (container) {
@@ -3013,21 +3427,6 @@ window.tryLoadLocalImage = function(imgElement, originalUrl, fileName, attIdx, t
                 <button class="btn btn-sm btn-outline-primary mt-1" onclick="retryLoadImage(this, '${originalUrl.replace(/'/g, "\\'")}', '${fileName.replace(/'/g, "\\'")}', ${attIdx}, '${tempBlobUrl.replace(/'/g, "\\'")}')">Retry</button>
             `;
         }
-        return;
-    }
-
-    // First try: local conversion from Cloudinary URL
-    const localUrl = cloudinaryToLocalUrl(originalUrl);
-    if (localUrl) {
-        imgElement.dataset.fallbackAttempted = 'true';
-        imgElement.src = localUrl;
-        return;
-    }
-
-    // Second try: temporary blob URL (if we have it)
-    if (tempBlobUrl) {
-        imgElement.dataset.fallbackAttempted = 'true';
-        imgElement.src = tempBlobUrl;
         return;
     }
 
@@ -3052,11 +3451,72 @@ window.retryLoadImage = function(button, originalUrl, fileName, attIdx, tempBlob
     const container = button.closest('.attachment-item');
     if (!container) return;
     // Replace with original image attempt
+    const retryCandidates = getImageCandidates(originalUrl, tempBlobUrl);
+    const safeCandidates = escapeHtml(JSON.stringify(retryCandidates)).replace(/'/g, '&#039;');
     container.innerHTML = `
-        <div class="attachment-preview"><img src="${ensureHttps(originalUrl)}" alt="${escapeHtml(fileName)}" onerror="this.onerror=null; tryLoadLocalImage(this, '${originalUrl.replace(/'/g, "\\'")}', '${fileName.replace(/'/g, "\\'")}', ${attIdx}, '${tempBlobUrl.replace(/'/g, "\\'")}')"></div>
+        <div class="attachment-preview"><img src="${escapeHtml(retryCandidates[0] || ensureHttps(originalUrl))}" alt="${escapeHtml(fileName)}" data-fallback-index="0" data-fallbacks='${safeCandidates}' onerror="this.onerror=null; tryLoadLocalImage(this, '${originalUrl.replace(/'/g, "\\'")}', '${fileName.replace(/'/g, "\\'")}', ${attIdx}, '${tempBlobUrl.replace(/'/g, "\\'")}', '${safeCandidates}')"></div>
         <div class="attachment-info">${escapeHtml(fileName)}</div>
     `;
 };
+
+window.trySuggestionImageFallback = function(imgElement) {
+    if (!imgElement) return;
+    let fallbacks = [];
+    try {
+        fallbacks = JSON.parse(imgElement.dataset.fallbacks || '[]');
+    } catch (e) {
+        fallbacks = [];
+    }
+    const idx = parseInt(imgElement.dataset.fallbackIndex || '0', 10);
+    const nextIdx = Number.isNaN(idx) ? 1 : idx + 1;
+    if (fallbacks[nextIdx]) {
+        imgElement.dataset.fallbackIndex = String(nextIdx);
+        imgElement.src = fallbacks[nextIdx];
+        return;
+    }
+    const retryRound = parseInt(imgElement.dataset.fallbackRetryRound || '0', 10);
+    const normalizedRetryRound = Number.isNaN(retryRound) ? 0 : retryRound;
+    const remote = (fallbacks || []).find(c => /^https?:\/\//i.test(c) || (typeof c === 'string' && c.startsWith('/media/')));
+    if (remote && normalizedRetryRound < 3) {
+        imgElement.dataset.fallbackRetryRound = String(normalizedRetryRound + 1);
+        setTimeout(() => {
+            const sep = remote.includes('?') ? '&' : '?';
+            imgElement.src = `${remote}${sep}retry=${Date.now()}`;
+        }, 1000 * (normalizedRetryRound + 1));
+        return;
+    }
+    imgElement.src = '/static/images/placeholder.png';
+};
+
+if (typeof window.agentAddToCart !== 'function') {
+    window.agentAddToCart = function(listingId) {
+        if (!listingId) return;
+        if (window.GlobalCart && typeof window.GlobalCart.add === 'function') {
+            window.GlobalCart.add(listingId, 1);
+            return;
+        }
+        if (typeof window.addToCart === 'function') {
+            window.addToCart(listingId, 1);
+            return;
+        }
+        showToast('Cart action is unavailable right now.', 'warning');
+    };
+}
+
+if (typeof window.agentRemoveFromCart !== 'function') {
+    window.agentRemoveFromCart = function(itemId) {
+        if (!itemId) return;
+        if (window.GlobalCart && typeof window.GlobalCart.remove === 'function') {
+            window.GlobalCart.remove(itemId);
+            return;
+        }
+        if (typeof window.removeFromCart === 'function') {
+            window.removeFromCart(itemId);
+            return;
+        }
+        showToast('Remove-from-cart action is unavailable right now.', 'warning');
+    };
+}
 
 function attachMessageEventListeners() {
     document.querySelectorAll('.message-group').forEach(el => {
@@ -3075,6 +3535,7 @@ async function sendMessage() {
     if (!input) return;
     const content = input.value.trim();
     if (!content && attachments.length === 0) return;
+    if (content) lastAssistantPromptContext = content;
 
     const sendBtn = document.getElementById('sendButton');
     if (sendBtn) sendBtn.disabled = true;
@@ -3122,6 +3583,12 @@ async function sendMessage() {
             if (!allMessages.some(m => m.id === newMsg.id)) {
                 allMessages.push(newMsg);
                 lastMessageId = Math.max(lastMessageId, newMsg.id);
+            }
+            if (data.assistant_message && data.assistant_message.id && !allMessages.some(m => m.id === data.assistant_message.id)) {
+                const aiMsg = data.assistant_message;
+                allMessages.push(aiMsg);
+                incomingAnimatedMessageIds.add(String(aiMsg.id));
+                lastMessageId = Math.max(lastMessageId, aiMsg.id);
             }
             // Remove temporary message from display
             temporaryMessages.delete(tempId);
@@ -3569,9 +4036,15 @@ window.showAttachmentViewer = (attachment) => {
         if (!m.attachments) return;
         m.attachments.forEach(att => {
             if (isImageAttachment(att)) {
-                const url = ensureHttps(att.url || att.file_url);
+                const candidates = getImageCandidates(att.url || att.file_url || att.thumbnail || att.preview_url || '', '');
+                const url = candidates[0] || '';
                 if (url) {
-                    galleryImages.push({ url: url, name: att.name || att.filename || ('image_' + (att.id || Math.random()).toString()), raw: att });
+                    galleryImages.push({
+                        url: url,
+                        fallbacks: candidates,
+                        name: att.name || att.filename || ('image_' + (att.id || Math.random()).toString()),
+                        raw: att
+                    });
                 }
             }
         });
@@ -3580,7 +4053,13 @@ window.showAttachmentViewer = (attachment) => {
     const matchUrl = ensureHttps(attachment.url || attachment.file_url);
     galleryIndex = galleryImages.findIndex(g => g.url === matchUrl);
     if (galleryIndex === -1) {
-        galleryImages = [{ url: matchUrl, name: attachment.name || attachment.filename || 'Attachment', raw: attachment }];
+        const directCandidates = getImageCandidates(attachment.url || attachment.file_url || '', '');
+        galleryImages = [{
+            url: directCandidates[0] || matchUrl,
+            fallbacks: directCandidates,
+            name: attachment.name || attachment.filename || 'Attachment',
+            raw: attachment
+        }];
         galleryIndex = 0;
     }
 
@@ -3589,7 +4068,8 @@ window.showAttachmentViewer = (attachment) => {
         if (!item) return;
         title.innerText = item.name || `Attachment ${i+1} of ${galleryImages.length}`;
         downloadLink.href = ensureHttps(item.url);
-        content.innerHTML = `<img src="${ensureHttps(item.url)}" style="max-width:100%;max-height:70vh;">`;
+        const safeFallbacks = escapeHtml(JSON.stringify(item.fallbacks || [item.url])).replace(/'/g, '&#039;');
+        content.innerHTML = `<img src="${escapeHtml(ensureHttps(item.url))}" data-fallback-index="0" data-fallback-retry-round="0" data-fallbacks='${safeFallbacks}' onerror="this.onerror=null; window.trySuggestionImageFallback(this);" style="max-width:100%;max-height:70vh;">`;
         const prev = document.getElementById('prevAttachment');
         const next = document.getElementById('nextAttachment');
         if (prev) prev.disabled = (i <= 0);
@@ -3746,6 +4226,9 @@ function handleNewMessage(message) {
 
     if (currentParticipantId && message.sender_id === currentParticipantId) {
         if (!allMessages.some(m => m.id === message.id)) {
+            if (message && message.id !== undefined && message.id !== null) {
+                incomingAnimatedMessageIds.add(String(message.id));
+            }
             allMessages.push(message);
             lastMessageId = Math.max(lastMessageId, message.id);
             renderMessages();

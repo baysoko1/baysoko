@@ -2,11 +2,13 @@ import json
 import logging
 import os
 import re
+import difflib
 import time as _time
 import random
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django.db.models import Q
 from django.utils import timezone
 from requests.exceptions import RequestException
 
@@ -283,6 +285,767 @@ def generate_listing_fields(title: str, context=None):
         return _enrich_parsed(parsed)
     return {"raw": text}
 
+
+def _extract_terms(text):
+    if not text:
+        return set()
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", str(text).lower())
+    return {t for t in cleaned.split() if len(t) > 2}
+
+
+def _dedupe_platform_items(items):
+    out = []
+    seen = set()
+    seen_titles = set()
+
+    def _canon_title(it):
+        title = str(it.get('title') or it.get('name') or it.get('store_name') or '').strip().lower()
+        title = re.sub(r'[^a-z0-9\s]', ' ', title)
+        title = re.sub(r'\s+', ' ', title).strip()
+        # drop weak trailing qualifiers so similar actions collapse
+        title = re.sub(r'\b(please|now|today|here|for you|for your account)\b', '', title).strip()
+        return re.sub(r'\s+', ' ', title).strip()
+
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        key = (
+            it.get('type'),
+            it.get('id'),
+            it.get('url'),
+            it.get('title') or it.get('name') or it.get('store_name'),
+        )
+        if key in seen:
+            continue
+        t = it.get('type')
+        canon = _canon_title(it)
+        if canon:
+            # For action suggestions and entities without stable ids, remove near-duplicate title pills.
+            title_key = (t, canon)
+            if (t == 'action_suggestion' and title_key in seen_titles) or (not it.get('id') and title_key in seen_titles):
+                continue
+            seen_titles.add(title_key)
+        seen.add(key)
+        out.append(it)
+    return out
+
+
+def _filter_platform_items_for_prompt(prompt, text, items):
+    items = _dedupe_platform_items(items)
+    if not items:
+        return []
+
+    context = f"{prompt or ''} {text or ''}".lower()
+    terms = _extract_terms(context)
+    store_inventory_like = bool(re.search(r"\b(my stores|stores in my account|stores i own|what stores do i own|what stores are in my account)\b", context))
+
+    def item_name(it):
+        return (it.get('title') or it.get('name') or it.get('store_name') or '').lower()
+
+    def type_match(it, allowed):
+        return (it.get('type') or '') in allowed
+
+    matched = []
+    action_items = [it for it in items if isinstance(it, dict) and (it.get('type') == 'action_suggestion')]
+    for it in items:
+        nm = item_name(it)
+        if nm and nm in context:
+            matched.append(it)
+            continue
+        nm_terms = _extract_terms(nm)
+        if nm_terms and terms and (nm_terms & terms):
+            matched.append(it)
+
+    if matched:
+        if store_inventory_like:
+            all_store = [it for it in items if isinstance(it, dict) and it.get('type') == 'store']
+            ordered = _dedupe_platform_items(all_store + action_items)
+            if ordered:
+                return ordered[:10]
+        ordered = _dedupe_platform_items(matched + action_items)
+        return ordered[:5]
+
+    if re.search(r"\b(subscription|subscriptions|plan|plans|billing|renew|upgrade|downgrade|cancel subscription|payment option)\b", context):
+        return _dedupe_platform_items([it for it in items if type_match(it, {'subscription', 'subscription_plan', 'store'})] + action_items)[:5]
+    if re.search(r"\b(order|orders|track|delivery)\b", context):
+        return _dedupe_platform_items([it for it in items if type_match(it, {'order'})] + action_items)[:5]
+    if re.search(r"\b(cart|checkout)\b", context):
+        return _dedupe_platform_items([it for it in items if type_match(it, {'cart', 'cart_item'})] + action_items)[:5]
+    if re.search(r"\b(store|stores|seller|shop)\b", context):
+        return _dedupe_platform_items([it for it in items if type_match(it, {'store'})] + action_items)[:5]
+    if re.search(r"\b(arrival|arrivals|listing|listings|item|items|featured|product|products|favorites|recent)\b", context):
+        return _dedupe_platform_items([it for it in items if type_match(it, {'listing', 'favorite'})] + action_items)[:5]
+    return _dedupe_platform_items(action_items)[:5]
+
+
+def _extract_action_suggestions_from_text(text):
+    raw = str(text or '').strip()
+    if not raw:
+        return raw, []
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", raw) if b.strip()]
+    if not blocks:
+        return raw, []
+
+    action_items = []
+    kept_blocks = list(blocks)
+    tail = blocks[-1]
+    looks_action_like = bool(re.match(r"^(would you like|do you want|would you prefer|you can|next step|next steps?)\b", tail, re.I))
+    if looks_action_like:
+        line = re.sub(r"\s+", " ", tail).strip()
+        url = None
+        low = line.lower()
+        title = _compact_action_suggestion_title(line)
+        if 'subscription' in low or 'plan' in low or 'billing' in low:
+            url = '/storefront/dashboard/'
+        elif 'cart' in low or 'checkout' in low:
+            url = '/listings/cart/'
+        elif 'order' in low:
+            url = '/listings/orders/'
+        action_items.append({
+            'type': 'action_suggestion',
+            'id': f'action_{abs(hash(line)) % 1000000}',
+            'title': title,
+            'reason': 'Suggested action.',
+            'url': url,
+        })
+        kept_blocks = blocks[:-1]
+
+    cleaned = '\n\n'.join(kept_blocks).strip() or raw
+    return cleaned, action_items
+
+
+def _attach_suggestion_reasons(prompt, text, items):
+    context = f"{prompt or ''} {text or ''}".lower()
+    out = []
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        item = dict(it)
+        if item.get('reason') or item.get('suggestion_reason'):
+            out.append(item)
+            continue
+        t = item.get('type')
+        if t in {'listing', 'favorite', 'cart_item'}:
+            if re.search(r"\b(stock|inventory|worth|value)\b", context):
+                stock = item.get('stock')
+                if stock is not None:
+                    item['reason'] = f"Relevant listing (stock: {stock})."
+                else:
+                    item['reason'] = 'Relevant listing.'
+            else:
+                item['reason'] = 'Relevant listing.'
+        elif t == 'store':
+            item['reason'] = 'Relevant store.'
+        elif t == 'order':
+            item['reason'] = 'Relevant order.'
+        elif t in {'subscription', 'subscription_plan'}:
+            item['reason'] = 'Subscription option.'
+        elif t == 'action_suggestion':
+            item['reason'] = item.get('reason') or 'Suggested action.'
+        out.append(item)
+    return out
+
+
+def _finalize_assistant_response(prompt, text, items):
+    text_clean, action_items = _extract_action_suggestions_from_text(text)
+    combined_items = list(items or []) + action_items
+    filtered = _filter_platform_items_for_prompt(prompt, text_clean, combined_items)
+    enriched = _attach_suggestion_reasons(prompt, text_clean, filtered)
+    enriched = _normalize_platform_item_urls(enriched)
+    return {
+        'text': text_clean or '',
+        'platform_items': enriched,
+    }
+
+
+def _format_user_identity_label(user):
+    if not user:
+        return 'your account'
+    full_name = ''
+    username = ''
+    try:
+        full_name = (user.get_full_name() or '').strip()
+    except Exception:
+        full_name = ''
+    try:
+        username = (getattr(user, 'username', '') or '').strip()
+    except Exception:
+        username = ''
+    if full_name and username and full_name.lower() != username.lower():
+        return f"{full_name} (@{username})"
+    return full_name or username or 'your account'
+
+
+def _replace_account_placeholders(text, user=None):
+    s = str(text or '').strip()
+    if not s:
+        return s
+    identity = _format_user_identity_label(user)
+    tokens = (
+        '[User Name/Username]',
+        '[UserName/Username]',
+        '[Username]',
+        '[username]',
+        '{username}',
+        '<username>',
+        'User Name/Username',
+    )
+    for t in tokens:
+        s = s.replace(t, identity)
+    s = re.sub(r"\[\s*user\s*name\s*/\s*username\s*\]", identity, s, flags=re.I)
+    s = re.sub(r"\buser\s*name\s*/\s*username\b", identity, s, flags=re.I)
+    return s
+
+
+def _compact_action_suggestion_title(line):
+    raw = re.sub(r"\s+", " ", str(line or "")).strip().rstrip("?")
+    low = raw.lower()
+    if any(k in low for k in ("subscription", "plan", "billing", "renew", "upgrade", "downgrade")):
+        return "Review subscription options"
+    if any(k in low for k in ("add", "cart", "checkout", "buy", "purchase")):
+        return "Go to cart and checkout"
+    if any(k in low for k in ("order", "track", "delivery")):
+        return "Check your orders"
+    if any(k in low for k in ("store", "shop", "seller")):
+        return "Open relevant stores"
+    if any(k in low for k in ("listing", "item", "product", "view")):
+        return "View matching listings"
+    cleaned = re.sub(r"^(would you like me to|would you like|do you want to|would you prefer to|you can)\s+", "", raw, flags=re.I).strip()
+    if not cleaned:
+        return "Suggested next action"
+    return cleaned[:64]
+
+
+def _normalize_internal_url(url):
+    raw = str(url or '').strip()
+    if not raw:
+        return None
+    if raw == '/cart/':
+        return '/listings/cart/'
+    if raw == '/checkout/':
+        return '/listings/checkout/'
+    if raw == '/orders/':
+        return '/listings/orders/'
+    if raw.startswith('/'):
+        return raw
+    return None
+
+
+def _normalize_platform_item_urls(items):
+    out = []
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        item = dict(it)
+        item['url'] = _normalize_internal_url(item.get('url'))
+        out.append(item)
+    return out
+
+
+def _get_assistant_gemini_model():
+    return (
+        getattr(settings, 'BAYSOKO_ASSISTANT_GEMINI_MODEL', None)
+        or os.environ.get('BAYSOKO_ASSISTANT_GEMINI_MODEL')
+        or getattr(settings, 'GEMINI_MODEL', None)
+        or os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
+    )
+
+
+def _get_assistant_gemini_models():
+    primary = _get_assistant_gemini_model()
+    models = []
+    if primary:
+        models.append(primary)
+    try:
+        extra_env = os.environ.get('BAYSOKO_ASSISTANT_GEMINI_CANDIDATES', '')
+        if extra_env:
+            for m in [x.strip() for x in extra_env.split(',') if x.strip()]:
+                if m not in models:
+                    models.append(m)
+    except Exception:
+        pass
+    try:
+        for m in (getattr(settings, 'GEMINI_CANDIDATE_MODELS', None) or []):
+            if m and m not in models:
+                models.append(m)
+    except Exception:
+        pass
+    if not models:
+        models = ['gemini-1.5-flash']
+    return models
+
+
+def _build_retrieval_context(retrieval_text=None, retrieval_items=None):
+    lines = []
+    if retrieval_text:
+        lines.append(f"Retriever summary: {str(retrieval_text).strip()}")
+    for it in (retrieval_items or []):
+        if not isinstance(it, dict):
+            continue
+        t = it.get('type') or 'item'
+        name = it.get('title') or it.get('name') or it.get('store_name') or f"{t} #{it.get('id')}"
+        price = it.get('price')
+        reason = it.get('reason') or it.get('suggestion_reason')
+        parts = [f"- {t}: {name}"]
+        if price not in (None, ''):
+            parts.append(f"price={price}")
+        if reason:
+            parts.append(f"reason={reason}")
+        url = it.get('url')
+        if url:
+            parts.append(f"url={url}")
+        lines.append(" | ".join(parts))
+    return "\n".join(lines).strip()
+
+
+def _build_gemini_final_prompt(base_prompt, user_prompt, retrieval_text=None, retrieval_items=None):
+    retrieval_context = _build_retrieval_context(retrieval_text=retrieval_text, retrieval_items=retrieval_items)
+    extra = (
+        "\n\nFinal response policy:\n"
+        "- Always provide the final answer directly to the user.\n"
+        "- Use Baysoko context and retrieved data accurately; do not fabricate facts.\n"
+        "- Keep response concise, mature, and action-oriented.\n"
+        "- Verify the answer matches the user prompt and retrieved Baysoko data before finalizing.\n"
+        "- Avoid generic filler or disclaimers unrelated to Baysoko.\n"
+        "- For account-specific questions, answer strictly from the currently signed-in user's data.\n"
+        "- Interpret first-person references ('I', 'my', 'me') as the currently signed-in user unless prompt is clearly general.\n"
+        "- If there are recommendations, phrase them naturally so UI suggestions can stay relevant.\n"
+    )
+    if retrieval_context:
+        extra += f"\nRetrieved Baysoko data:\n{retrieval_context}\n"
+    extra += f"\nUser prompt: {user_prompt}\n"
+    return f"{base_prompt}{extra}"
+
+
+def _get_feedback_profile(user_id=None):
+    if not user_id:
+        return {}
+    try:
+        return cache.get(f'agent_feedback_profile:{user_id}') or {}
+    except Exception:
+        return {}
+
+
+def _build_feedback_adaptation_notes(user_id=None, context=None):
+    notes = []
+    profile = _get_feedback_profile(user_id=user_id)
+    if profile:
+        dislikes = int(profile.get('dislike', 0) or 0)
+        likes = int(profile.get('like', 0) or 0)
+        if dislikes > likes:
+            notes.append("Recent user feedback shows dissatisfaction: prioritize precision and direct task completion.")
+        last_bad = str(profile.get('last_disliked_prompt') or '').strip()
+        if last_bad:
+            notes.append(f"Avoid repeating the style from the previously disliked response context: '{last_bad[:160]}'.")
+    try:
+        user_msgs = []
+        if isinstance(context, list):
+            for h in context[-20:]:
+                if isinstance(h, dict) and str(h.get('role') or '').lower() == 'user':
+                    user_msgs.append(str(h.get('content') or '').lower())
+        if any(re.search(r"\b(wrong|incorrect|not what i asked|irrelevant|generic|not helpful|bad answer)\b", m) for m in user_msgs):
+            notes.append("User indicated prior answers were wrong/irrelevant: answer strictly with grounded Baysoko facts.")
+    except Exception:
+        pass
+    return "\n".join(notes).strip()
+
+
+def _looks_generic_response(text):
+    low = str(text or '').strip().lower()
+    if not low:
+        return True
+    generic_patterns = (
+        r"\bas an ai\b",
+        r"\bi do not have (access|visibility)\b",
+        r"\bi can't access\b",
+        r"\bit depends\b",
+        r"\bgenerally speaking\b",
+        r"\bthis request initiates the process\b",
+        r"\bstreamlined path toward checkout\b",
+    )
+    return any(re.search(p, low) for p in generic_patterns)
+
+
+def _contradicts_retrieval(model_text, retrieval_text=None, retrieval_items=None):
+    if not model_text:
+        return True
+    low = str(model_text).lower()
+    has_items = bool(retrieval_items)
+    if has_items and re.search(r"\b(no|not|none)\b.{0,24}\b(found|available|results|listing|store|item|match)\b", low):
+        return True
+    if retrieval_text and _looks_generic_response(model_text):
+        return True
+    return False
+
+
+def _generate_gemini_text(prompt_text):
+    prompt_text = str(prompt_text or '')
+    models = _get_assistant_gemini_models()
+    try:
+        from google import genai
+        client = genai.Client()
+        for model in models:
+            try:
+                resp = client.models.generate_content(model=model, contents=prompt_text)
+                text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
+                if text:
+                    return str(text).strip()
+            except Exception:
+                continue
+    except Exception:
+        logger.debug('Gemini client final-response generation failed; trying REST fallback', exc_info=True)
+
+    try:
+        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)
+        if not api_key:
+            return None
+        headers = {'x-goog-api-key': api_key, 'Content-Type': 'application/json'}
+        payload = {'contents': [{'parts': [{'text': prompt_text}]}]}
+        for model in models:
+            url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+            max_attempts = 2
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    r = requests.post(url, json=payload, headers=headers, timeout=30)
+                    r.raise_for_status()
+                    j = r.json()
+                    text = str(j['candidates'][0]['content']['parts'][0]['text']).strip()
+                    if text:
+                        return text
+                except RequestException as rexc:
+                    status = rexc.response.status_code if getattr(rexc, 'response', None) is not None else None
+                    if status in {503, 429} and attempt < max_attempts:
+                        _time.sleep((2 ** attempt) + random.uniform(0, 0.5))
+                        continue
+                    break
+    except Exception:
+        logger.debug('Gemini REST final-response generation failed', exc_info=True)
+        return None
+
+
+def _respond_with_gemini_final(user_prompt, base_prompt, retrieval_text=None, retrieval_items=None, fallback_text=None):
+    final_prompt = _build_gemini_final_prompt(
+        base_prompt=base_prompt,
+        user_prompt=user_prompt,
+        retrieval_text=retrieval_text,
+        retrieval_items=retrieval_items,
+    )
+    model_text = _generate_gemini_text(final_prompt)
+    if _contradicts_retrieval(model_text, retrieval_text=retrieval_text, retrieval_items=retrieval_items):
+        strict_prompt = (
+            final_prompt
+            + "\n\nCorrection pass:\n"
+            + "- Your previous draft was generic or inconsistent with retrieved Baysoko data.\n"
+            + "- Regenerate a precise final answer grounded only in the provided data and user intent.\n"
+            + "- Keep it concise and actionable.\n"
+        )
+        strict_text = _generate_gemini_text(strict_prompt)
+        if strict_text and not _contradicts_retrieval(strict_text, retrieval_text=retrieval_text, retrieval_items=retrieval_items):
+            model_text = strict_text
+    text = model_text or fallback_text or 'Assistant is temporarily unavailable.'
+    if _contradicts_retrieval(text, retrieval_text=retrieval_text, retrieval_items=retrieval_items):
+        text = fallback_text or retrieval_text or text
+    return _finalize_assistant_response(user_prompt, text, retrieval_items or [])
+
+
+def _extract_listing_from_history(context):
+    """Try to resolve the most recently suggested listing from conversation history."""
+    if not isinstance(context, list):
+        return None
+    for h in reversed(context):
+        if not isinstance(h, dict):
+            continue
+        role = str(h.get('role') or '').lower()
+        if role not in {'assistant', 'bot'}:
+            continue
+        content = h.get('content')
+        payload = None
+        if isinstance(content, dict):
+            payload = content
+        elif isinstance(content, str):
+            payload = _extract_json(content) or parse_json_like(content)
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get('platform_items') or payload.get('items') or []
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            if isinstance(it, dict) and it.get('type') in {'listing', 'favorite', 'cart_item'} and it.get('id'):
+                return it
+    return None
+
+
+def parse_json_like(text):
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _is_affirmative_reply(text):
+    low = str(text or '').strip().lower()
+    return bool(re.search(r"\b(yes|yeah|yep|sure|okay|ok|confirm|do it|go ahead|proceed)\b", low))
+
+
+def _is_negative_reply(text):
+    low = str(text or '').strip().lower()
+    return bool(re.search(r"\b(no|nah|cancel|stop|dont|don't|not now|leave it)\b", low))
+
+
+def _extract_previous_cart_request_from_context(context, current_prompt=''):
+    if not isinstance(context, list):
+        return None
+    current_norm = str(current_prompt or '').strip().lower()
+    user_msgs = []
+    for h in context:
+        if not isinstance(h, dict):
+            continue
+        if str(h.get('role') or '').lower() != 'user':
+            continue
+        c = str(h.get('content') or '').strip()
+        if not c:
+            continue
+        user_msgs.append(c)
+    for c in reversed(user_msgs):
+        if c.strip().lower() == current_norm:
+            continue
+        low = c.lower()
+        if re.search(r"\b(add|put|remove|delete|take out)\b", low):
+            return c
+    return None
+
+
+def _try_resolve_listing_for_cart(prompt, context=None):
+    """Resolve listing to add to cart from prompt text or recent context."""
+    try:
+        from listings.models import Listing
+        raw = str(prompt or '').strip()
+        # title-based resolution from prompt
+        m = re.search(r"add\s+(?:the\s+)?(.+?)\s+to\s+(?:my\s+)?cart", raw, re.I)
+        if m:
+            q = m.group(1).strip()
+            # Normalize quantity phrases, e.g. "3 ugali", "3 of ugali"
+            q = re.sub(r"^\d+\s+(?:x\s+|of\s+)?", "", q, flags=re.I).strip()
+            if q and q.lower() not in {'it', 'this', 'that'}:
+                l = Listing.objects.filter(title__icontains=q, is_active=True, is_sold=False).order_by('-date_created').first()
+                if l:
+                    return l
+        # Also handle: "add 5 items of Bees Wax", "add 3 Ugali please"
+        m2 = re.search(r"add\s+(?:the\s+)?(?:\d+\s+)?(?:x\s+)?(?:items?\s+of\s+|units?\s+of\s+|pieces?\s+of\s+)?(.+?)(?:\s+please|\s+now|[?.!,]|$)", raw, re.I)
+        if m2:
+            q = m2.group(1).strip()
+            q = re.sub(r"^(?:my\s+)?(?:cart\s+)?", "", q, flags=re.I).strip()
+            q = re.sub(r"^\d+\s+(?:x\s+|of\s+)?", "", q, flags=re.I).strip()
+            q = re.sub(r"\s+(?:to\s+cart|in\s+cart)$", "", q, flags=re.I).strip()
+            if q and q.lower() not in {'it', 'this', 'that'}:
+                l = Listing.objects.filter(title__icontains=q, is_active=True, is_sold=False).order_by('-date_created').first()
+                if l:
+                    return l
+        # fallback to context "it/this"
+        recent = _extract_listing_from_history(context)
+        if recent and recent.get('id'):
+            l = Listing.objects.filter(pk=recent.get('id'), is_active=True, is_sold=False).first()
+            if l:
+                return l
+    except Exception:
+        logger.debug('_try_resolve_listing_for_cart failed', exc_info=True)
+    return None
+
+
+def _extract_quantity_from_prompt(prompt, default=1):
+    try:
+        # Prefer explicit quantity tied to item/cart verbs, e.g. "add 5 items of bees wax".
+        m = re.search(r"\b(?:add|put|remove|delete|take out)\s+(\d+)\b", str(prompt or ''), flags=re.I)
+        if m:
+            q = int(m.group(1))
+            return max(1, min(q, 999))
+        m = re.search(r"\b(\d+)\b", str(prompt or ''))
+        if m:
+            q = int(m.group(1))
+            return max(1, min(q, 999))
+    except Exception:
+        pass
+    return int(default or 1)
+
+
+def _try_resolve_cart_item_for_removal(prompt, user_id=None, context=None):
+    try:
+        from listings.models import Cart
+        if not user_id:
+            return None, None
+        cart = Cart.objects.filter(user_id=user_id).first()
+        if not cart:
+            return None, None
+        q = None
+        m = re.search(r"(?:remove|delete|take out)\s+(?:the\s+)?(.+?)\s+(?:from\s+)?(?:my\s+)?cart", str(prompt or ''), re.I)
+        if m:
+            q = m.group(1).strip()
+        if q and q.lower() not in {'it', 'this', 'that', 'item'}:
+            item = cart.items.select_related('listing').filter(
+                Q(listing__title__icontains=q) | Q(listing__description__icontains=q)
+            ).order_by('-id').first()
+            if item:
+                return cart, item
+        recent = _extract_listing_from_history(context)
+        if recent and recent.get('id'):
+            item = cart.items.select_related('listing').filter(listing_id=recent.get('id')).first()
+            if item:
+                return cart, item
+        # If cart has exactly one item, use it to avoid unnecessary clarification.
+        only = cart.items.select_related('listing').all()[:2]
+        if len(only) == 1:
+            return cart, only[0]
+    except Exception:
+        logger.debug('_try_resolve_cart_item_for_removal failed', exc_info=True)
+    return None, None
+
+
+def _handle_cart_action_intent(prompt, context=None, user_id=None):
+    original_prompt = str(prompt or '').strip()
+    low = original_prompt.lower()
+    affirmative_reply = _is_affirmative_reply(original_prompt)
+    negative_reply = _is_negative_reply(original_prompt)
+    resolved_from_context = False
+
+    if (affirmative_reply or negative_reply) and not re.search(r"\b(add|put|remove|delete|take out)\b", low):
+        prior = _extract_previous_cart_request_from_context(context, current_prompt=original_prompt)
+        if prior:
+            if negative_reply:
+                return {'text': 'Okay, I will not change your cart.', 'platform_items': []}
+            prompt = prior
+            low = str(prior).strip().lower()
+            resolved_from_context = True
+
+    listing_hint = bool(re.search(r"\b(add|put)\b.*\b(item|items|unit|units|piece|pieces|of)\b", low))
+    add_intent = bool(re.search(r"\b(add|put)\b.*\b(cart)\b", low)) or listing_hint
+    remove_intent = bool(re.search(r"\b(remove|delete|take out)\b.*\b(cart)\b", low))
+    if (add_intent or remove_intent) and affirmative_reply:
+        resolved_from_context = True
+    if not (add_intent or remove_intent):
+        return None
+    if not user_id:
+        return {'text': 'Please sign in to manage your cart.', 'platform_items': []}
+    try:
+        from listings.models import Cart, CartItem
+        cart, _ = Cart.objects.get_or_create(user_id=user_id)
+
+        if add_intent:
+            listing = _try_resolve_listing_for_cart(prompt, context=context)
+            if not listing:
+                return {'text': 'Tell me which item to add, or open a listing and ask again.', 'platform_items': []}
+            stock = int(getattr(listing, 'stock', 0) or 0)
+            if stock <= 0:
+                return {'text': f'{listing.title} is currently out of stock.', 'platform_items': []}
+            if getattr(listing, 'seller_id', None) == user_id:
+                return {'text': 'You cannot add your own listing to cart.', 'platform_items': []}
+
+            qty = _extract_quantity_from_prompt(prompt, default=1)
+            if qty > stock:
+                return {'text': f'Only {stock} unit(s) are available for {listing.title}.', 'platform_items': []}
+            if not resolved_from_context:
+                return {
+                    'text': f"Please confirm: add {qty} unit(s) of {listing.title} to your cart?",
+                    'platform_items': [
+                        {
+                            'type': 'action_suggestion',
+                            'id': f'confirm_add_{listing.id}_{qty}',
+                            'title': f'Confirm add {qty} {listing.title}',
+                            'url': '/listings/cart/',
+                            'reason': 'Confirm cart update.',
+                        },
+                        {
+                            'type': 'action_suggestion',
+                            'id': 'cancel_cart_change',
+                            'title': 'Cancel cart update',
+                            'url': '/listings/cart/',
+                            'reason': 'No change will be made unless confirmed.',
+                        },
+                    ],
+                }
+            cart_item, created = CartItem.objects.get_or_create(cart=cart, listing=listing, defaults={'quantity': qty})
+            if not created:
+                next_qty = int(cart_item.quantity or 0) + qty
+                if next_qty > stock:
+                    return {'text': f'Only {stock} unit(s) are available for {listing.title}.', 'platform_items': []}
+                cart_item.quantity = next_qty
+                cart_item.save(update_fields=['quantity'])
+            total_items = int(sum(int(ci.quantity or 0) for ci in cart.items.all()))
+            total_price = float(cart.get_total_price() or 0)
+            item = {
+                'type': 'cart_item',
+                'id': listing.id,
+                'cart_item_id': cart_item.id,
+                'title': listing.title,
+                'price': str(listing.price),
+                'quantity': int(cart_item.quantity or 1),
+                'url': listing.get_absolute_url(),
+                'image': listing.image.url if listing.image else None,
+                'cart_item_count': total_items,
+                'cart_total': total_price,
+                'reason': 'Added to cart.',
+            }
+            text = f"Added {listing.title} to your cart. You now have {total_items} item(s) in cart."
+            return {'text': text, 'platform_items': [item]}
+
+        # remove intent
+        cart, cart_item = _try_resolve_cart_item_for_removal(prompt, user_id=user_id, context=context)
+        if not cart or not cart_item:
+            return {'text': 'Tell me which cart item to remove.', 'platform_items': []}
+        listing = cart_item.listing
+        remove_qty = _extract_quantity_from_prompt(prompt, default=int(cart_item.quantity or 1))
+        if not resolved_from_context:
+            return {
+                'text': f"Please confirm: remove {remove_qty} unit(s) of {listing.title} from your cart?",
+                'platform_items': [
+                    {
+                        'type': 'action_suggestion',
+                        'id': f'confirm_remove_{listing.id}_{remove_qty}',
+                        'title': f'Confirm remove {remove_qty} {listing.title}',
+                        'url': '/listings/cart/',
+                        'reason': 'Confirm cart update.',
+                    },
+                    {
+                        'type': 'action_suggestion',
+                        'id': 'cancel_cart_change',
+                        'title': 'Cancel cart update',
+                        'url': '/listings/cart/',
+                        'reason': 'No change will be made unless confirmed.',
+                    },
+                ],
+            }
+        if remove_qty >= int(cart_item.quantity or 1):
+            cart_item.delete()
+            remaining_qty = 0
+            removed_mode = 'removed'
+        else:
+            cart_item.quantity = max(0, int(cart_item.quantity or 0) - remove_qty)
+            cart_item.save(update_fields=['quantity'])
+            remaining_qty = int(cart_item.quantity or 0)
+            removed_mode = 'updated'
+        total_items = int(sum(int(ci.quantity or 0) for ci in cart.items.all()))
+        total_price = float(cart.get_total_price() or 0)
+        item = {
+            'type': 'cart_item',
+            'id': listing.id,
+            'cart_item_id': getattr(cart_item, 'id', None),
+            'title': listing.title,
+            'price': str(listing.price),
+            'quantity': remaining_qty,
+            'url': listing.get_absolute_url(),
+            'image': listing.image.url if listing.image else None,
+            'cart_item_count': total_items,
+            'cart_total': total_price,
+            'reason': 'Removed from cart.' if removed_mode == 'removed' else 'Cart quantity reduced.',
+        }
+        if removed_mode == 'removed':
+            text = f"Removed {listing.title} from your cart. You now have {total_items} item(s) in cart."
+        else:
+            text = f"Reduced {listing.title} in your cart to {remaining_qty}. You now have {total_items} item(s) in cart."
+        return {'text': text, 'platform_items': [item]}
+    except Exception:
+        logger.debug('_handle_cart_action_intent failed', exc_info=True)
+        return {'text': 'I could not update your cart right now. Please try again.', 'platform_items': []}
+
 def assistant_reply(prompt: str, context=None, user_id=None):
     """
     General Baysoko Assistant reply. Returns a dict with:
@@ -293,10 +1056,15 @@ def assistant_reply(prompt: str, context=None, user_id=None):
         "You are the Baysoko Assistant. Help users with buying, selling, creating stores, "
         "listings, editing, deleting, subscriptions, orders, favorites, and general platform tasks. "
         "Answer concisely and provide actionable steps; when appropriate, offer next actions (e.g., 'Add to cart', 'Create listing'). "
+        "When user account context is available, answer account-specific questions strictly using the signed-in user's data only. "
+        "Interpret first-person references (I/my/me) as the currently signed-in user unless the prompt is clearly general. "
         "If the user asks about anything outside the platform, politely redirect to platform‑related topics."
     )
-    full_prompt = sys_prompt + "\n\nUser: " + str(prompt)
+    prompt_text = str(prompt or '')
+    low_prompt = prompt_text.strip().lower()
+    full_prompt = sys_prompt + "\n\nUser: " + prompt_text
     platform_items = []
+    user = None
 
     # 1. Gather user‑specific platform data (if logged in)
     try:
@@ -315,6 +1083,17 @@ def assistant_reply(prompt: str, context=None, user_id=None):
             max_prompt_items = getattr(settings, 'ASSISTANT_PROMPT_MAX_ITEMS', 8)
 
             if user:
+                # Signed-in identity snapshot for strict account-grounded responses.
+                display_identity = _format_user_identity_label(user)
+                platform_lines.append('Signed-in user profile:')
+                platform_lines.append(f"- identity: {display_identity}")
+                platform_lines.append(f"- username: {getattr(user, 'username', '')}")
+                if getattr(user, 'email', None):
+                    platform_lines.append(f"- email: {user.email}")
+                if getattr(user, 'first_name', None):
+                    platform_lines.append(f"- first_name: {user.first_name}")
+                if getattr(user, 'last_name', None):
+                    platform_lines.append(f"- last_name: {user.last_name}")
                 # Favorites
                 favs = Favorite.objects.filter(user=user).select_related('listing')[:fav_limit]
                 if favs:
@@ -395,9 +1174,30 @@ def assistant_reply(prompt: str, context=None, user_id=None):
                             'image': s.logo.url if s.logo else None,
                         })
                         platform_lines.append(f"- {s.name} | {s.get_absolute_url()}")
+                # User subscriptions (strictly user-scoped)
+                subs = Subscription.objects.filter(store__owner=user).select_related('store').order_by('-created_at')[:store_limit]
+                if subs:
+                    platform_lines.append('Your subscriptions:')
+                    for sub in subs:
+                        sub_url = f"/storefront/dashboard/store/{sub.store.slug}/subscription/manage/"
+                        platform_items.append({
+                            'type': 'subscription',
+                            'id': sub.id,
+                            'store_id': sub.store.id,
+                            'store_name': sub.store.name,
+                            'plan': sub.plan,
+                            'status': sub.status,
+                            'price': str(getattr(sub, 'amount', '')),
+                            'expires': sub.current_period_end.isoformat() if sub.current_period_end else None,
+                            'url': sub_url,
+                        })
+                        platform_lines.append(
+                            f"- {sub.store.name} | plan={sub.plan} | status={sub.status} | manage={sub_url}"
+                        )
             # Global lowest priced item
+            should_include_market_listing = bool(re.search(r"\b(arrival|arrivals|new|featured|listing|listings|item|items|product|products|cheapest|lowest)\b", low_prompt))
             lowest = Listing.objects.filter(is_active=True, is_sold=False).order_by('price').first()
-            if lowest:
+            if lowest and should_include_market_listing:
                 platform_items.append({
                     'type': 'listing',
                     'id': lowest.id,
@@ -409,150 +1209,180 @@ def assistant_reply(prompt: str, context=None, user_id=None):
                 platform_lines.append('Lowest priced item on platform:')
                 platform_lines.append(f"- {lowest.title} | {lowest.price} | {lowest.get_absolute_url()}")
             if platform_lines:
-                if len(platform_lines) > max_prompt_items:
-                    platform_lines = platform_lines[:max_prompt_items]
+                effective_max_prompt_items = max(int(max_prompt_items or 0), 24)
+                if len(platform_lines) > effective_max_prompt_items:
+                    platform_lines = platform_lines[:effective_max_prompt_items]
                 base = sys_prompt + '\nPlatform data (user‑scoped):\n' + '\n'.join(platform_lines) + '\n\n'
                 if context and isinstance(context, list):
                     hist = '\n'.join([(h.get('role','user')+': '+h.get('content','')) if isinstance(h, dict) else str(h) for h in context])
-                    full_prompt = base + 'Conversation history:\n' + hist + '\n\nUser: ' + str(prompt)
+                    full_prompt = base + 'Conversation history:\n' + hist + '\n\nUser: ' + prompt_text
                 else:
-                    full_prompt = base + 'User: ' + str(prompt)
+                    full_prompt = base + 'User: ' + prompt_text
     except Exception as e:
         logger.debug('Error building platform summary', exc_info=True)
 
-    # 2. Try to answer directly from database (factual queries)
-    db_answer = _answer_from_db(prompt, user_id=user_id)
-    if db_answer:
-        return db_answer
+    retrieval_text = None
+    retrieval_items = []
 
-    # 3. Quick intent handling (structured queries)
+    # 2. Intent-first retrieval; final user text is always model-rendered.
+    cart_action_answer = _handle_cart_action_intent(prompt_text, context=context, user_id=user_id)
+    if cart_action_answer:
+        retrieval_text = cart_action_answer.get('text')
+        retrieval_items = cart_action_answer.get('platform_items', [])
+
+    if retrieval_text is None:
+        compare_answer = _handle_listing_comparison_intent(prompt_text, user_id=user_id)
+        if compare_answer:
+            retrieval_text = compare_answer.get('text')
+            retrieval_items = compare_answer.get('platform_items', [])
+
+    if retrieval_text is None:
+        decision_answer = _handle_decision_support_intent(prompt_text, user_id=user_id)
+        if decision_answer:
+            retrieval_text = decision_answer.get('text')
+            retrieval_items = decision_answer.get('platform_items', [])
+
+    if retrieval_text is None:
+        store_rec_answer = _recommend_stores_for_request(prompt_text, user_id=user_id)
+        if store_rec_answer:
+            retrieval_text = store_rec_answer.get('text')
+            retrieval_items = store_rec_answer.get('platform_items', [])
+
+    if retrieval_text is None and user_id and re.search(r"\b(what stores are in my account|what stores do i own|stores i own|my stores|stores in my account)\b", low_prompt):
+        my_stores = _query_user_stores(user_id=user_id, limit=10)
+        retrieval_text = f"Found {len(my_stores)} store(s)." if my_stores else "No stores found in your account."
+        retrieval_items = my_stores
+
+    if retrieval_text is None and user_id and user and re.search(r"\b(who am i|who am i signed in as|which account (am i|i am) signed in|what account (am i|i am) signed in|my current account|current account)\b", low_prompt):
+        identity = _format_user_identity_label(user)
+        retrieval_text = f"You are currently signed in as {identity}."
+        retrieval_items = [
+            {
+                'type': 'action_suggestion',
+                'id': 'open-profile',
+                'title': 'Open my profile',
+                'url': f"/profile/{user.id}/",
+                'reason': 'Review your current account details.',
+            },
+            {
+                'type': 'action_suggestion',
+                'id': 'open-orders',
+                'title': 'Open my inbox',
+                'url': '/chats/',
+                'reason': 'Continue account support in chat.',
+            },
+        ]
+
+    if retrieval_text is None and user_id and _is_followup_for_owned_listings(prompt_text, context=context):
+        my_listings = _query_user_owned_listings(user_id=user_id, limit=20)
+        retrieval_text = f"Found {len(my_listings)} listing(s) in your account." if my_listings else "You do not have active listings yet."
+        retrieval_items = my_listings
+
+    if retrieval_text is None:
+        db_answer = _answer_from_db(prompt, user_id=user_id)
+        if db_answer:
+            retrieval_text = db_answer.get('text')
+            retrieval_items = db_answer.get('platform_items', [])
+
+    # 3. Quick retrieval handling.
     low = prompt.strip().lower()
-    # Stores
-    if re.search(r"\b(store|stores|store info|store details)\b", low):
+    if retrieval_text is None and re.search(r"\b(store|stores|store info|store details)\b", low):
         try:
             items = _query_stores(prompt=prompt, user_id=user_id)
-            text = f"Found {len(items)} store(s)." if items else "No stores found."
-            return {'text': text, 'platform_items': items}
+            retrieval_text = f"Found {len(items)} store(s)." if items else "No stores found."
+            retrieval_items = items
         except Exception:
-            pass
-    # Listings search
-    if re.search(r"\b(listings|find listings|show me listings|search listings|find items|show items)\b", low) or re.search(r"\b(find|show)\b.*\blisting|items\b", low):
+            logger.debug('Store query retrieval failed', exc_info=True)
+
+    if retrieval_text is None and (
+        re.search(r"\b(listings|find listings|show me listings|search listings|find items|show items)\b", low)
+        or re.search(r"\b(find|show)\b.*\blisting|items\b", low)
+    ):
         try:
             filters = _parse_listing_filters_from_text(prompt)
             items = _query_listings(filters=filters, limit=5, user_id=user_id)
-            text = f"Found {len(items)} listing(s) matching your criteria." if items else "No listings found."
-            return {'text': text, 'platform_items': items}
+            retrieval_text = f"Found {len(items)} listing(s) matching your criteria." if items else "No listings found."
+            retrieval_items = items
         except Exception:
-            pass
-    # Cheapest item
-    if re.search(r"\b(lowest|cheapest|cheapest item|lowest priced|cheapest price)\b", low):
+            logger.debug('Listing query retrieval failed', exc_info=True)
+
+    if retrieval_text is None and re.search(r"\b(lowest|cheapest|cheapest item|lowest priced|cheapest price)\b", low):
         try:
             item = _get_lowest_priced_listing()
-            if item:
-                text = f"Lowest priced item: {item.get('title','Unnamed')} — {item.get('price','')}."
-                return {'text': text, 'platform_items': [item]}
-            else:
-                return {'text': 'No active listings found.', 'platform_items': []}
+            retrieval_text = f"Lowest priced item: {item.get('title','Unnamed')} - {item.get('price','')}." if item else 'No active listings found.'
+            retrieval_items = [item] if item else []
         except Exception:
-            pass
-    # Store owner lookup
-    m_owner = re.search(r"who is the owner of ([\w\s'\-]+)\??", low)
-    if m_owner:
-        try:
-            store_name = m_owner.group(1).strip()
-            stores = _query_stores(filters={'name': store_name}, limit=5, user_id=user_id)
-            if stores:
-                s = stores[0]
-                owner = s.get('owner') or 'unknown'
-                text = f"{s.get('name')} is owned by {owner}."
-                return {'text': text, 'platform_items': [s]}
-            else:
-                return {'text': f'No store named "{store_name}" found.', 'platform_items': []}
-        except Exception:
-            pass
-    # Subscriptions
-    if re.search(r"\b(subscription|subscriptions|subscribe|cancel subscription|renew subscription|my subscription)\b", low):
+            logger.debug('Lowest-priced retrieval failed', exc_info=True)
+
+    if retrieval_text is None:
+        m_owner = re.search(r"who is the owner of ([\w\s'\-]+)\??", low)
+        if m_owner:
+            try:
+                store_name = m_owner.group(1).strip()
+                stores = _query_stores(filters={'name': store_name}, limit=5, user_id=user_id)
+                if stores:
+                    s = stores[0]
+                    owner = s.get('owner') or 'unknown'
+                    retrieval_text = f"{s.get('name')} is owned by {owner}."
+                    retrieval_items = [s]
+                else:
+                    retrieval_text = f'No store named "{store_name}" found.'
+                    retrieval_items = []
+            except Exception:
+                logger.debug('Store owner retrieval failed', exc_info=True)
+
+    if retrieval_text is None and re.search(r"\b(subscription|subscriptions|subscribe|cancel subscription|renew subscription|my subscription)\b", low):
         try:
             res_text, items = _handle_subscription_intent(prompt, user_id)
-            return {'text': res_text, 'platform_items': items}
+            retrieval_text = res_text
+            retrieval_items = items or []
         except Exception:
-            pass
-    # Orders
-    if re.search(r"\b(order|orders|my orders|track order)\b", low):
+            logger.debug('Subscription retrieval failed', exc_info=True)
+
+    if retrieval_text is None and re.search(r"\b(order|orders|my orders|track order)\b", low):
         try:
             res_text, items = _handle_order_intent(prompt, user_id)
             if res_text:
-                return {'text': res_text, 'platform_items': items}
+                retrieval_text = res_text
+                retrieval_items = items or []
         except Exception:
-            pass
+            logger.debug('Order retrieval failed', exc_info=True)
 
-    # 3.5 Try registry-based retrieval (RAG): match patterns, retrieve data, then ask Gemini to generate fluent answer
-    try:
-        db_result = try_database_query(prompt, user_id)
-        if db_result:
-            data = db_result.get('data') or []
-            # If we have structured data, build augmented prompt and ask Gemini to render a fluent answer
-            if data:
-                augmented_prompt = (
-                    f"The user asked: '{prompt}'.\n"
-                    f"Here is the relevant data from our database:\n{db_result.get('context','')}\n\n"
-                    "Based on this data, provide a helpful, concise answer. If the data is insufficient, say so."
-                )
-                try:
-                    from google import genai
-                    client = genai.Client()
-                    model = getattr(settings, 'GEMINI_MODEL', None) or os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
-                    resp = client.models.generate_content(model=model, contents=augmented_prompt)
-                    text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
-                    return {'text': text or db_result.get('text', ''), 'platform_items': data}
-                except Exception:
-                    logger.debug('Gemini augmented prompt failed; returning summary', exc_info=True)
-                    return {'text': db_result.get('text', ''), 'platform_items': data}
-            else:
-                # no data found for query (informative message)
-                return {'text': db_result.get('text', ''), 'platform_items': []}
-    except Exception:
-        pass
+    # 3.5 Registry-based retrieval.
+    if retrieval_text is None:
+        try:
+            db_result = try_database_query(prompt, user_id)
+            if db_result:
+                retrieval_text = db_result.get('text')
+                retrieval_items = db_result.get('data') or []
+        except Exception:
+            logger.debug('Registry retrieval failed', exc_info=True)
 
-    # 4. If no quick intent matched, call Gemini for a creative answer
-    if context and 'Platform data (user‑scoped):' not in full_prompt:
+    if context and 'Platform data (userscoped):' not in full_prompt and 'Platform data (user-scoped):' not in full_prompt:
         try:
             if isinstance(context, list):
-                hist = '\n'.join([(h.get('role','user')+': '+h.get('content','')) if isinstance(h, dict) else str(h) for h in context])
-                full_prompt = sys_prompt + '\nConversation history:\n' + hist + '\n\nUser: ' + str(prompt)
+                hist = '\n'.join([(h.get('role', 'user') + ': ' + h.get('content', '')) if isinstance(h, dict) else str(h) for h in context])
+                full_prompt = sys_prompt + '\nConversation history:\n' + hist + '\n\nUser: ' + prompt_text
             else:
-                full_prompt = sys_prompt + '\nContext:\n' + str(context) + '\n\nUser: ' + str(prompt)
+                full_prompt = sys_prompt + '\nContext:\n' + str(context) + '\n\nUser: ' + prompt_text
         except Exception:
-            pass
+            logger.debug('Failed to append conversation context to prompt', exc_info=True)
 
-    # Try Gemini client
-    try:
-        from google import genai
-        client = genai.Client()
-        model = getattr(settings, 'GEMINI_MODEL', None) or os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
-        resp = client.models.generate_content(model=model, contents=full_prompt)
-        text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
-        return {'text': text or '', 'platform_items': platform_items}
-    except Exception:
-        logger.debug('Gemini client failed, falling back to REST', exc_info=True)
+    adaptation_notes = _build_feedback_adaptation_notes(user_id=user_id, context=context)
+    if adaptation_notes:
+        full_prompt = f"{full_prompt}\n\nAdaptation notes:\n{adaptation_notes}\n"
 
-    # REST fallback
-    try:
-        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)
-        if not api_key:
-            return {'text': "Assistant is currently unavailable (API key missing).", 'platform_items': platform_items}
-        headers = {'x-goog-api-key': api_key, 'Content-Type': 'application/json'}
-        model = getattr(settings, 'GEMINI_MODEL', None) or os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
-        url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
-        payload = {'contents': [{'parts': [{'text': full_prompt}]}]}
-        r = requests.post(url, json=payload, headers=headers, timeout=30)
-        r.raise_for_status()
-        j = r.json()
-        text = j['candidates'][0]['content']['parts'][0]['text']
-        return {'text': text, 'platform_items': platform_items}
-    except Exception as e:
-        logger.exception('assistant_reply REST fallback failed: %s', e)
-        return {'text': 'Assistant is temporarily unavailable.', 'platform_items': platform_items}
+    # 4. Always route final response through Gemini.
+    response = _respond_with_gemini_final(
+        user_prompt=prompt_text,
+        base_prompt=full_prompt,
+        retrieval_text=retrieval_text,
+        retrieval_items=(retrieval_items or platform_items),
+        fallback_text=retrieval_text or 'Assistant is temporarily unavailable.',
+    )
+    if isinstance(response, dict):
+        response['text'] = _replace_account_placeholders(response.get('text', ''), user=user)
+    return response
 
 # ========== QUERY HELPERS ==========
 def _query_stores(prompt=None, filters=None, limit=5, user_id=None):
@@ -560,6 +1390,9 @@ def _query_stores(prompt=None, filters=None, limit=5, user_id=None):
     try:
         from storefront.models import Store, Subscription
         qs = Store.objects.all()
+        low_prompt = str(prompt or '').lower()
+        if user_id and re.search(r"\b(my stores|stores in my account|stores i own|what stores do i own|what stores are in my account)\b", low_prompt):
+            qs = qs.filter(owner_id=user_id)
         if filters:
             name = filters.get('name')
             if name:
@@ -570,8 +1403,10 @@ def _query_stores(prompt=None, filters=None, limit=5, user_id=None):
             owner = filters.get('owner')
             if owner:
                 qs = qs.filter(owner__username__icontains=owner)
-        if user_id:
-            qs = qs.order_by('-owner_id')
+            owner_id = filters.get('owner_id')
+            if owner_id:
+                qs = qs.filter(owner_id=owner_id)
+        qs = qs.order_by('-created_at')
         stores = qs[:limit]
         out = []
         for s in stores:
@@ -587,6 +1422,7 @@ def _query_stores(prompt=None, filters=None, limit=5, user_id=None):
                 'subscription_status': status,
                 'url': f"/store/{s.slug}/",
                 'image': s.logo.url if s.logo else None,
+                'reason': 'Relevant store for your request.',
             })
         return out
     except Exception as e:
@@ -634,7 +1470,7 @@ def _query_listings(filters=None, limit=10, order_by='-date_created', user_id=No
                     qs = qs.filter(category=cat)
             if 'q' in filters:
                 q = filters['q']
-                qs = qs.filter(title__icontains=q) | qs.filter(description__icontains=q)
+                qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
         if order_by:
             qs = qs.order_by(order_by)
         if limit:
@@ -646,6 +1482,7 @@ def _query_listings(filters=None, limit=10, order_by='-date_created', user_id=No
                 'id': l.id,
                 'title': l.title,
                 'price': str(l.price),
+                'stock': int(getattr(l, 'stock', 0) or 0),
                 'url': l.get_absolute_url(),
                 'location': getattr(l, 'location', ''),
                 'seller': getattr(l.seller, 'username', None),
@@ -680,10 +1517,461 @@ def _get_lowest_priced_listing(user_id=None, store_id=None):
         logger.debug('_get_lowest_priced_listing error: %s', e)
         return None
 
+
+def _get_most_expensive_listing(user_id=None, store_id=None):
+    """Return a single listing dict for the highest priced active listing."""
+    try:
+        from listings.models import Listing
+        qs = Listing.objects.filter(is_active=True, is_sold=False)
+        if store_id:
+            qs = qs.filter(store_id=store_id)
+        hi = qs.order_by('-price').first()
+        if not hi:
+            return None
+        return {
+            'type': 'listing',
+            'id': hi.id,
+            'title': hi.title,
+            'price': str(hi.price),
+            'url': hi.get_absolute_url(),
+            'location': getattr(hi, 'location', ''),
+            'seller': getattr(hi.seller, 'username', None),
+            'image': hi.image.url if hi.image else None,
+            'reason': 'Highest price among active listings.',
+        }
+    except Exception as e:
+        logger.debug('_get_most_expensive_listing error: %s', e)
+        return None
+
+
+def _query_user_stores(user_id, limit=10):
+    try:
+        from storefront.models import Store, Subscription
+        stores = Store.objects.filter(owner_id=user_id).order_by('-created_at')[:limit]
+        out = []
+        for s in stores:
+            sub = Subscription.objects.filter(store=s).order_by('-created_at').first()
+            out.append({
+                'type': 'store',
+                'id': s.id,
+                'name': s.name,
+                'slug': s.slug,
+                'owner': getattr(s.owner, 'username', None),
+                'is_premium': getattr(s, 'is_premium', False),
+                'subscription_status': sub.status if sub else 'none',
+                'url': f"/store/{s.slug}/",
+                'image': s.logo.url if getattr(s, 'logo', None) else None,
+                'reason': 'Owned by your account.',
+            })
+        return out
+    except Exception:
+        logger.debug('_query_user_stores failed', exc_info=True)
+        return []
+
+
+def _query_user_owned_listings(user_id, limit=20):
+    try:
+        from listings.models import Listing
+        qs = Listing.objects.filter(
+            Q(seller_id=user_id) | Q(store__owner_id=user_id),
+            is_active=True,
+            is_sold=False
+        ).distinct().order_by('-date_created')[:limit]
+        out = []
+        for l in qs:
+            out.append({
+                'type': 'listing',
+                'id': l.id,
+                'title': l.title,
+                'price': str(l.price),
+                'stock': int(getattr(l, 'stock', 0) or 0),
+                'url': l.get_absolute_url(),
+                'location': getattr(l, 'location', ''),
+                'image': l.image.url if l.image else None,
+                'reason': 'Listing owned by your account.',
+            })
+        return out
+    except Exception:
+        logger.debug('_query_user_owned_listings failed', exc_info=True)
+        return []
+
+
+def _extract_last_user_prompt_from_context(context):
+    if not isinstance(context, list):
+        return ''
+    for h in reversed(context):
+        if not isinstance(h, dict):
+            continue
+        if str(h.get('role') or '').lower() == 'user':
+            return str(h.get('content') or '')
+    return ''
+
+
+def _is_followup_for_owned_listings(prompt, context=None):
+    low = str(prompt or '').strip().lower()
+    if re.search(r"\b(show|list|display)\b.*\b(my account|my listings|listings i own|ones in my account|ones i own|the ones)\b", low):
+        return True
+    if re.search(r"\b(show|list|display)\b.*\b(the ones|them|those)\b", low):
+        prev = _extract_last_user_prompt_from_context(context).lower()
+        if re.search(r"\b(listings|items|how many listings|my listings)\b", prev):
+            return True
+    return False
+
+
+def _build_listing_item(l, reason=None):
+    return {
+        'type': 'listing',
+        'id': l.id,
+        'title': l.title,
+        'price': str(l.price),
+        'stock': int(getattr(l, 'stock', 0) or 0),
+        'url': l.get_absolute_url(),
+        'location': getattr(l, 'location', ''),
+        'seller': getattr(getattr(l, 'seller', None), 'username', None),
+        'image': l.image.url if l.image else None,
+        'reason': reason or 'Relevant listing for your request.',
+    }
+
+
+def _extract_compare_candidates(prompt):
+    text = str(prompt or '').strip()
+    patterns = [
+        r"compare\s+(.+?)\s+(?:and|vs|versus)\s+(.+)",
+        r"which\s+is\s+better\s+(.+?)\s+(?:or|vs|versus)\s+(.+)",
+        r"(.+?)\s+(?:vs|versus)\s+(.+)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            a = m.group(1).strip(" ?.,")
+            b = m.group(2).strip(" ?.,")
+            if a and b:
+                return [a, b]
+    return []
+
+
+def _resolve_listing_by_name(name, user_id=None):
+    try:
+        from listings.models import Listing
+        qs = Listing.objects.filter(is_active=True, is_sold=False)
+        if user_id and re.search(r"\b(my|account|i own)\b", str(name or '').lower()):
+            qs = qs.filter(Q(seller_id=user_id) | Q(store__owner_id=user_id)).distinct()
+        hit = qs.filter(title__icontains=name).order_by('-date_created').first()
+        if hit:
+            return hit
+        # Fuzzy fallback across a manageable subset
+        cands = list(qs.order_by('-date_created')[:120])
+        if not cands:
+            return None
+        n_query = _normalize_store_label(name)
+        scored = []
+        for l in cands:
+            n_title = _normalize_store_label(l.title)
+            ratio = difflib.SequenceMatcher(None, n_query, n_title).ratio() if (n_query and n_title) else 0
+            if ratio >= 0.45:
+                scored.append((ratio, l))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1] if scored else None
+    except Exception:
+        logger.debug('_resolve_listing_by_name failed', exc_info=True)
+        return None
+
+
+def _handle_listing_comparison_intent(prompt, user_id=None):
+    low = str(prompt or '').lower()
+    if not re.search(r"\b(compare|vs|versus|which is better)\b", low):
+        return None
+    names = _extract_compare_candidates(prompt)
+    if len(names) < 2:
+        return None
+    a = _resolve_listing_by_name(names[0], user_id=user_id)
+    b = _resolve_listing_by_name(names[1], user_id=user_id)
+    if not a or not b:
+        return {'text': 'I could not resolve both listing options to compare. Please share exact listing names.', 'platform_items': []}
+
+    def _pick():
+        wants_budget = bool(re.search(r"\b(cheap|cheaper|budget|affordable|low price)\b", low))
+        wants_premium = bool(re.search(r"\b(premium|luxury|high end|best quality)\b", low))
+        if wants_budget:
+            return a if a.price <= b.price else b, 'Best for budget (lower price).'
+        if wants_premium:
+            return a if a.price >= b.price else b, 'Best premium pick (higher-priced option).'
+        # default: balanced by lower price with in-stock preference
+        a_score = (1 if (getattr(a, 'stock', 0) or 0) > 0 else 0) - float(a.price or 0) / 1_000_000
+        b_score = (1 if (getattr(b, 'stock', 0) or 0) > 0 else 0) - float(b.price or 0) / 1_000_000
+        return (a, 'Balanced pick based on price and availability.') if a_score >= b_score else (b, 'Balanced pick based on price and availability.')
+
+    winner, winner_reason = _pick()
+    text = (
+        f"Comparison:\n"
+        f"- {a.title}: KSh {a.price:,.2f}, stock {int(getattr(a, 'stock', 0) or 0):,}, location {getattr(a, 'location', 'N/A')}.\n"
+        f"- {b.title}: KSh {b.price:,.2f}, stock {int(getattr(b, 'stock', 0) or 0):,}, location {getattr(b, 'location', 'N/A')}.\n\n"
+        f"Recommendation: {winner.title}. {winner_reason}"
+    )
+    items = [
+        _build_listing_item(a, reason='Comparison option A.'),
+        _build_listing_item(b, reason='Comparison option B.'),
+        _build_listing_item(winner, reason=winner_reason),
+    ]
+    return {'text': text, 'platform_items': items}
+
+
+def _handle_decision_support_intent(prompt, user_id=None):
+    low = str(prompt or '').lower()
+    if not re.search(r"\b(help me choose|which should i buy|what should i buy|recommend (an |a )?(item|listing)|best option)\b", low):
+        return None
+    try:
+        filters = _parse_listing_filters_from_text(prompt)
+        items = _query_listings(filters=filters, limit=8, user_id=user_id)
+        if not items:
+            return {'text': 'I could not find listings matching your criteria. Try adding budget, category, or location.', 'platform_items': []}
+
+        wants_budget = bool(re.search(r"\b(budget|cheap|affordable|low price)\b", low))
+        wants_premium = bool(re.search(r"\b(premium|luxury|high end|best quality)\b", low))
+
+        def score(it):
+            price = float(str(it.get('price') or '0').replace(',', '') or 0)
+            stock = int(it.get('stock') or 0)
+            s = stock * 0.05
+            if wants_budget:
+                s -= price / 100000
+            elif wants_premium:
+                s += price / 100000
+            else:
+                s -= price / 300000
+            return s
+
+        ranked = sorted(items, key=score, reverse=True)
+        top = ranked[:3]
+        if top:
+            top[0]['reason'] = 'Top match based on your stated preferences.'
+            for i in top[1:]:
+                i['reason'] = i.get('reason') or 'Alternative option to compare.'
+        text = f"Based on your request, I recommend {top[0].get('title')} as the best starting option. I have also included alternatives to compare."
+        return {'text': text, 'platform_items': top}
+    except Exception:
+        logger.debug('_handle_decision_support_intent failed', exc_info=True)
+        return None
+
+
+def _recommend_stores_for_request(prompt, user_id=None):
+    low = str(prompt or '').lower()
+    if not re.search(r"\b(recommend (a )?store|which store|best store|where can i buy|store for)\b", low):
+        return None
+    try:
+        from storefront.models import Store
+        from listings.models import Listing, Category
+        terms = [t for t in _extract_terms(prompt) if t not in {'recommend', 'store', 'stores', 'best', 'where', 'buy'}]
+        price_max = None
+        m = re.search(r"(?:under|below|less than)\s*(?:ksh|kes|kshs)?\s*([0-9,]+(?:\.[0-9]+)?)", low, re.I)
+        if m:
+            price_max = float(m.group(1).replace(',', ''))
+
+        category_obj = None
+        m_cat = re.search(r"(?:for|in)\s+category\s+([\w\s'\-]+)", prompt, re.I)
+        if m_cat:
+            category_obj = Category.objects.filter(name__icontains=m_cat.group(1).strip()).first()
+
+        qs = Listing.objects.filter(is_active=True, is_sold=False, store__isnull=False)
+        if price_max is not None:
+            qs = qs.filter(price__lte=price_max)
+        if category_obj:
+            qs = qs.filter(category=category_obj)
+        if terms:
+            q_obj = Q()
+            for t in terms:
+                q_obj |= Q(title__icontains=t) | Q(description__icontains=t) | Q(store__name__icontains=t)
+            qs = qs.filter(q_obj)
+
+        listing_samples = list(qs.select_related('store', 'store__owner').order_by('-date_created')[:200])
+        if not listing_samples:
+            return {'text': 'I could not find store matches for that request yet. Try adding category, location, or budget.', 'platform_items': []}
+
+        store_scores = {}
+        for l in listing_samples:
+            st = l.store
+            if not st:
+                continue
+            sid = st.id
+            if sid not in store_scores:
+                store_scores[sid] = {'store': st, 'count': 0, 'min_price': None, 'sample': l}
+            entry = store_scores[sid]
+            entry['count'] += 1
+            entry['min_price'] = float(l.price) if entry['min_price'] is None else min(entry['min_price'], float(l.price))
+
+        ranked = sorted(
+            store_scores.values(),
+            key=lambda e: (e['count'] + (0.5 if getattr(e['store'], 'is_premium', False) else 0), -(e['min_price'] or 0)),
+            reverse=True
+        )[:5]
+
+        out = []
+        for e in ranked:
+            st = e['store']
+            reason = f"Matched {e['count']} relevant listing(s)"
+            if e['min_price'] is not None:
+                reason += f"; from about KSh {e['min_price']:,.2f}"
+            out.append({
+                'type': 'store',
+                'id': st.id,
+                'name': st.name,
+                'slug': st.slug,
+                'owner': getattr(st.owner, 'username', None),
+                'is_premium': getattr(st, 'is_premium', False),
+                'url': f"/store/{st.slug}/",
+                'image': st.logo.url if getattr(st, 'logo', None) else None,
+                'reason': reason,
+            })
+        text = "Here are store recommendations based on what you're looking for."
+        return {'text': text, 'platform_items': out}
+    except Exception:
+        logger.debug('_recommend_stores_for_request failed', exc_info=True)
+        return None
+
+
+def _extract_store_name_from_prompt(prompt):
+    text = str(prompt or '').strip()
+    patterns = [
+        r"(?:in|for|of)\s+my\s+(.+?)(?:\s+(?:online\s+)?stores?\b|\s+storefront\b|\s+shop\b|$)",
+        r"(?:store\s+named|store\s+called)\s+([\w\s'\-&]+)",
+        r"(?:my\s+)([\w\s'\-&]+?)(?:\s+stores?\b)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            raw = m.group(1).strip()
+            raw = re.split(r"\s+(?:and|with|plus)\s+", raw, maxsplit=1, flags=re.I)[0].strip()
+            return raw
+    return None
+
+
+def _normalize_store_label(value):
+    s = re.sub(r"[^a-z0-9\s]", " ", str(value or "").lower())
+    tokens = [t for t in s.split() if t and t not in {"store", "stores", "online", "shop", "the", "my"}]
+    return " ".join(tokens).strip()
+
+
+def _find_user_store_by_name(user_id, store_query):
+    try:
+        from storefront.models import Store
+        qs = Store.objects.filter(owner_id=user_id)
+        if not store_query:
+            stores = list(qs[:5])
+            if len(stores) == 1:
+                return stores[0]
+            return None
+
+        direct = qs.filter(name__icontains=store_query).order_by('-id').first()
+        if direct:
+            return direct
+
+        n_query = _normalize_store_label(store_query)
+        stores = list(qs[:50])
+        if not stores:
+            return None
+        scored = []
+        for st in stores:
+            name_raw = st.name or ''
+            n_name = _normalize_store_label(name_raw)
+            score = 0.0
+            if n_query and n_name:
+                score = difflib.SequenceMatcher(None, n_query, n_name).ratio()
+                q_terms = set(n_query.split())
+                n_terms = set(n_name.split())
+                if q_terms and n_terms:
+                    overlap = len(q_terms & n_terms) / max(1, len(q_terms))
+                    score = max(score, overlap)
+            scored.append((score, st))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if scored and scored[0][0] >= 0.45:
+            return scored[0][1]
+    except Exception:
+        logger.debug('_find_user_store_by_name failed', exc_info=True)
+    return None
+
+
+def _answer_store_inventory_summary(prompt, user_id=None):
+    low = (prompt or '').strip().lower()
+    inventory_asked = bool(re.search(r"\b(stock|inventory|worth|value|total worth|collective stock|stock count|total stock)\b", low))
+    if not inventory_asked:
+        return None
+    mentions_store = bool(re.search(r"\bstore|online store|shop\b", low))
+    if not mentions_store:
+        return None
+
+    try:
+        from django.db.models import Sum, F, DecimalField, ExpressionWrapper, Count
+        from storefront.models import Store
+        from listings.models import Listing
+
+        requires_user_scope = bool(re.search(r"\bmy\b", low))
+        if requires_user_scope and not user_id:
+            return {'text': 'Please sign in so I can calculate totals for your store.', 'platform_items': []}
+
+        store_q = _extract_store_name_from_prompt(prompt)
+        if requires_user_scope:
+            store = _find_user_store_by_name(user_id, store_q)
+        else:
+            store_qs = Store.objects.all()
+            if store_q:
+                store_qs = store_qs.filter(name__icontains=store_q)
+            store = store_qs.order_by('-id').first()
+        if not store:
+            if requires_user_scope:
+                return {'text': 'I could not find that store in your account.', 'platform_items': []}
+            return {'text': 'I could not find a matching store for that request.', 'platform_items': []}
+
+        line_value_expr = ExpressionWrapper(F('stock') * F('price'), output_field=DecimalField(max_digits=20, decimal_places=2))
+        listings = Listing.objects.filter(store=store, is_active=True, is_sold=False)
+        agg = listings.aggregate(
+            total_stock=Sum('stock'),
+            total_worth=Sum(line_value_expr),
+            listing_count=Count('id')
+        )
+        total_stock = int(agg.get('total_stock') or 0)
+        total_worth = agg.get('total_worth') or 0
+        listing_count = int(agg.get('listing_count') or 0)
+
+        top_items = listings.annotate(line_value=line_value_expr).order_by('-line_value')[:3]
+        platform_items = []
+        for l in top_items:
+            line_value = getattr(l, 'line_value', 0) or 0
+            platform_items.append({
+                'type': 'listing',
+                'id': l.id,
+                'title': l.title,
+                'price': str(l.price),
+                'stock': int(getattr(l, 'stock', 0) or 0),
+                'line_value': str(line_value),
+                'url': l.get_absolute_url(),
+                'image': l.image.url if l.image else None,
+                'reason': f"High inventory impact: {int(getattr(l, 'stock', 0) or 0)} units, est. KSh {line_value:,.2f}",
+            })
+
+        platform_items.append({
+            'type': 'store',
+            'id': store.id,
+            'name': store.name,
+            'url': f"/storefront/dashboard/store/{store.slug}/subscription/manage/",
+            'reason': 'Store found and scoped for your inventory summary request.',
+        })
+
+        text = (
+            f'{store.name}: {listing_count} active listing(s), total stock {total_stock:,} unit(s), '
+            f'estimated total worth KSh {total_worth:,.2f}.'
+        )
+        return {'text': text, 'platform_items': platform_items}
+    except Exception as e:
+        logger.debug('_answer_store_inventory_summary error: %s', e)
+        return None
+
 def _answer_from_db(prompt: str, user_id=None):
     """Answer common factual queries directly from the database."""
     try:
         low = (prompt or '').strip().lower()
+        inv_summary = _answer_store_inventory_summary(prompt, user_id=user_id)
+        if inv_summary:
+            return inv_summary
         # How many stores
         if re.search(r"\bhow many stores\b", low) or re.search(r"\bnumber of stores\b", low):
             from storefront.models import Store
@@ -692,6 +1980,13 @@ def _answer_from_db(prompt: str, user_id=None):
         # How many listings
         if re.search(r"\bhow many listings\b", low) or re.search(r"\bnumber of listings\b", low):
             from listings.models import Listing
+            if user_id and re.search(r"\b(i|my|me|made|in my account)\b", low):
+                cnt = Listing.objects.filter(
+                    Q(seller_id=user_id) | Q(store__owner_id=user_id),
+                    is_active=True,
+                    is_sold=False
+                ).distinct().count()
+                return {'text': f'You have {cnt} active listing(s) in your account.', 'platform_items': _query_user_owned_listings(user_id, limit=10)}
             cnt = Listing.objects.filter(is_active=True, is_sold=False).count()
             return {'text': f'There are {cnt} active listing(s) on Baysoko.', 'platform_items': []}
         # Cheapest item
@@ -700,13 +1995,21 @@ def _answer_from_db(prompt: str, user_id=None):
             if item:
                 return {'text': f"Lowest priced item: {item.get('title')} — {item.get('price')}", 'platform_items': [item]}
             return {'text': 'No active listings found.', 'platform_items': []}
+        # Most expensive item
+        if re.search(r"\b(most expensive|highest priced|highest price|most costly|priciest)\b", low):
+            item = _get_most_expensive_listing(user_id=user_id)
+            if item:
+                return {'text': f"Most expensive item: {item.get('title')} — {item.get('price')}", 'platform_items': [item]}
+            return {'text': 'No active listings found.', 'platform_items': []}
         # Order lookup by number
         m = re.search(r"order\s*#?(\d+)", prompt)
         if m:
             try:
+                if not user_id:
+                    return {'text': 'Please sign in to track specific orders.', 'platform_items': []}
                 oid = int(m.group(1))
                 from listings.models import Order
-                o = Order.objects.filter(pk=oid).first()
+                o = Order.objects.filter(pk=oid, user_id=user_id).first()
                 if o:
                     items = o.order_items.select_related('listing')[:3]
                     item_str = ', '.join([f"{it.listing.title} x{it.quantity}" for it in items])
@@ -719,7 +2022,7 @@ def _answer_from_db(prompt: str, user_id=None):
                         'url': o.get_absolute_url() if hasattr(o, 'get_absolute_url') else None,
                     }]
                     return {'text': f'Order #{o.id} — status: {o.status}. Total: {o.total_price}.', 'platform_items': platform_items}
-                return None
+                return {'text': f'Order #{oid} was not found in your account.', 'platform_items': []}
             except Exception:
                 pass
         # Search for listing by name
@@ -1061,44 +2364,162 @@ def _handle_subscription_intent(prompt: str, user_id=None):
             User = get_user_model()
             user = User.objects.filter(pk=user_id).first()
         low = prompt.strip().lower()
-        # Subscription status
+        store_q = _extract_store_name_from_prompt(prompt)
+        target_sub = None
+        if user:
+            subs_qs = Subscription.objects.filter(store__owner=user).select_related('store').order_by('-created_at')
+            if store_q:
+                target_sub = subs_qs.filter(Q(store__name__icontains=store_q) | Q(store__slug__icontains=store_q)).first()
+            if not target_sub:
+                target_sub = subs_qs.first()
+
         if 'my subscription' in low or 'subscription status' in low or 'what is my subscription' in low:
             if not user:
                 return ('Please sign in to view your subscriptions.', [])
             summary = SubscriptionService.get_subscription_summary(user)
             text = f"You have {summary.get('total_stores',0)} store(s). Active subscriptions: {summary.get('active_subscriptions',0)}."
-            # Optionally return subscription items
             items = []
-            active_subs = Subscription.objects.filter(store__owner=user, status='active')[:3]
+            active_subs = Subscription.objects.filter(store__owner=user).select_related('store').order_by('-created_at')[:8]
             for sub in active_subs:
                 items.append({
                     'type': 'subscription',
+                    'id': sub.id,
                     'store_name': sub.store.name,
-                    'plan': sub.plan_name,
+                    'plan': getattr(sub, 'plan', None) or getattr(sub, 'plan_name', None),
                     'status': sub.status,
+                    'price': str(getattr(sub, 'amount', '')),
                     'expires': sub.current_period_end.isoformat() if sub.current_period_end else None,
+                    'url': f"/storefront/dashboard/store/{sub.store.slug}/subscription/manage/",
                 })
             return (text, items)
-        # Cancel subscription
+
+        if re.search(r"\b(manage subscription|open subscription|subscription page|billing page)\b", low):
+            if not user:
+                return ('Please sign in to manage subscriptions.', [])
+            stores = Store.objects.filter(owner=user).order_by('-created_at')[:8]
+            items = [{
+                'type': 'subscription',
+                'id': s.id,
+                'store_name': s.name,
+                'status': 'manage',
+                'url': f"/storefront/dashboard/store/{s.slug}/subscription/manage/",
+                'reason': 'Manage subscription.',
+            } for s in stores]
+            return ('Open any subscription below to manage billing, plan, and renewal.', items)
+
+        if re.search(r"\b(renew subscription|renew my subscription|reactivate subscription)\b", low):
+            if not user:
+                return ('Please sign in to renew subscriptions.', [])
+            if not target_sub:
+                return ('No subscription found to renew.', [])
+            m_phone = re.search(r"(\+?\d[\d\-\s]{7,})", prompt)
+            phone = m_phone.group(1).strip() if m_phone else None
+            if not phone:
+                return (
+                    f"To renew {target_sub.store.name}, share your M-Pesa number in this chat or open manage subscription.",
+                    [{
+                        'type': 'subscription',
+                        'id': target_sub.id,
+                        'store_name': target_sub.store.name,
+                        'status': target_sub.status,
+                        'plan': target_sub.plan,
+                        'url': f"/storefront/dashboard/store/{target_sub.store.slug}/subscription/manage/",
+                    }]
+                )
+            ok, msg = SubscriptionService.renew_subscription(target_sub, phone_number=phone)
+            return (
+                (msg if isinstance(msg, str) else 'Renewal request processed.'),
+                [{
+                    'type': 'subscription',
+                    'id': target_sub.id,
+                    'store_name': target_sub.store.name,
+                    'status': target_sub.status,
+                    'plan': target_sub.plan,
+                    'url': f"/storefront/dashboard/store/{target_sub.store.slug}/subscription/manage/",
+                }]
+            )
+
+        if re.search(r"\b(upgrade|downgrade|change plan|switch plan)\b", low):
+            if not user:
+                return ('Please sign in to change subscription plans.', [])
+            if not target_sub:
+                return ('No subscription found to change plan.', [])
+            m_plan = re.search(r"\b(basic|premium|enterprise|free)\b", low)
+            if not m_plan:
+                plans = SubscriptionService.get_display_plans()
+                items = [{
+                    'type': 'subscription_plan',
+                    'id': k,
+                    'name': f"{k.title()} plan",
+                    'price': str(v.get('price', '')),
+                    'features': v.get('features', []),
+                    'reason': 'Available plan option.',
+                } for k, v in plans.items()]
+                return ('Specify the plan you want (basic, premium, or enterprise).', items)
+            new_plan = m_plan.group(1).strip().lower()
+            ok, msg = SubscriptionService.change_plan(target_sub.store, new_plan)
+            out_msg = msg if isinstance(msg, str) else (f'Plan changed to {new_plan}.' if ok else 'Failed to change plan.')
+            return (
+                out_msg,
+                [{
+                    'type': 'subscription',
+                    'id': target_sub.id,
+                    'store_name': target_sub.store.name,
+                    'status': target_sub.status,
+                    'plan': new_plan,
+                    'url': f"/storefront/dashboard/store/{target_sub.store.slug}/subscription/manage/",
+                }]
+            )
+
         if 'cancel subscription' in low or 'cancel my subscription' in low:
             if not user:
                 return ('Please sign in to cancel subscriptions.', [])
-            sub = Subscription.objects.filter(store__owner=user).order_by('-created_at').first()
+            sub = target_sub or Subscription.objects.filter(store__owner=user).order_by('-created_at').first()
             if not sub:
                 return ('No subscription found to cancel.', [])
-            success = SubscriptionService.cancel_subscription(sub, cancel_at_period_end=False)
-            return ('Subscription canceled.' if success else 'Failed to cancel subscription.', [])
-        # List plans
-        if 'list plans' in low or 'plans' == low.strip() or 'what plans' in low:
+            immediate = bool(re.search(r"\b(immediately|now|right away)\b", low))
+            success = SubscriptionService.cancel_subscription(sub, cancel_at_period_end=not immediate)
+            text = 'Subscription canceled immediately.' if immediate else 'Subscription cancellation scheduled at period end.'
+            return (text if success else 'Failed to cancel subscription.', [{
+                'type': 'subscription',
+                'id': sub.id,
+                'store_name': sub.store.name,
+                'status': sub.status,
+                'plan': sub.plan,
+                'url': f"/storefront/dashboard/store/{sub.store.slug}/subscription/manage/",
+            }])
+
+        if 'list plans' in low or low.strip() == 'plans' or 'what plans' in low:
             plans = SubscriptionService.get_display_plans()
             text = 'Available plans: ' + ', '.join([f"{k} ({v['price']})" for k,v in plans.items()])
-            return (text, [])
-        # Default summary
+            items = []
+            for k, v in plans.items():
+                items.append({
+                    'type': 'subscription_plan',
+                    'id': k,
+                    'name': f"{k.title()} plan",
+                    'price': str(v.get('price', '')),
+                    'features': v.get('features', []),
+                })
+            return (text, items)
+
         if user:
             summ = SubscriptionService.get_subscription_summary(user)
-            text = f"Subscription summary: {summ.get('total_stores',0)} stores; {summ.get('active_subscriptions',0)} active subscriptions."
-            return (text, [])
-        return ('Subscription help: you can ask about your subscription status, cancel a subscription, or list available plans.', [])
+            text = (
+                f"Subscription summary: {summ.get('total_stores',0)} stores; "
+                f"{summ.get('active_subscriptions',0)} active subscriptions. "
+                "Ask me to manage, renew, cancel, or change plan for a specific store."
+            )
+            stores = Store.objects.filter(owner=user)[:5]
+            items = [{
+                'type': 'subscription',
+                'id': s.id,
+                'store_name': s.name,
+                'status': 'manage',
+                'url': f"/storefront/dashboard/store/{s.slug}/subscription/manage/",
+            } for s in stores]
+            return (text, items)
+        return ('Subscription help: ask about status, plans, renewals, plan changes, or cancellations.', [])
     except Exception as e:
         logger.debug('_handle_subscription_intent error: %s', e)
         return ('Subscription service unavailable.', [])
@@ -1111,11 +2532,10 @@ def _handle_order_intent(prompt: str, user_id=None):
         # Track order by number
         m = re.search(r"track\s+order\s*#?(\d+)", low)
         if m:
+            if not user_id:
+                return ('Please sign in to track your order details.', [])
             oid = int(m.group(1))
-            if user_id:
-                o = Order.objects.filter(pk=oid, user_id=user_id).first()
-            else:
-                o = Order.objects.filter(pk=oid).first()
+            o = Order.objects.filter(pk=oid, user_id=user_id).first()
             if o:
                 items = o.order_items.select_related('listing')[:3]
                 item_str = ', '.join([f"{it.listing.title} x{it.quantity}" for it in items])

@@ -338,9 +338,9 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_
 # Pin a stable model to avoid runtime probing. Set via env `GEMINI_MODEL` to override.
 # Default model: prefer a known-supported Gemini variant for REST fallbacks.
 # Override via the GEMINI_MODEL environment variable if you have a different model.
-GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-1.5-flash')
+GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-3.1-flash-lite-preview')
 # When pinned, candidate probing will use only the pinned model to avoid extra requests
-GEMINI_CANDIDATE_MODELS = [GEMINI_MODEL]
+GEMINI_CANDIDATE_MODELS = ['gemini-3.1-flash-lite-preview', 'gemini-3.1-pro-preview','gemini-2.5-flash','gemini-1.5-pro']
 
 # Channels (WebSocket) configuration - in-memory layer for development
 ASGI_APPLICATION = 'baysoko.asgi.application'
@@ -829,11 +829,61 @@ try:
 except Exception:
     channels_hosts = ['redis://localhost:6379/1']
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
-    },
-}
+# Use Redis-backed channel layer in production when REDIS_URL is available.
+try:
+    use_redis_channel = False
+    # Only enable Redis channel layer when the Redis server supports the
+    # commands channels_redis requires (BZPOPMIN). Some hosted Redis
+    # alternatives or older Redis versions don't implement this command and
+    # will raise a ResponseError at runtime. Probe the server version and
+    # fall back to InMemoryChannelLayer for local/dev compatibility.
+    if REDIS_URL and isinstance(REDIS_URL, str) and REDIS_URL.startswith('redis://'):
+        try:
+            probe_client = redis.Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+            info = probe_client.info()
+            version = info.get('redis_version', '')
+            if version:
+                major = int(str(version).split('.')[0])
+                # BZPOPMIN reliably available in Redis 7+; require major >= 7
+                if major >= 7:
+                    use_redis_channel = True
+                else:
+                    print(f"⚠️  Redis server version {version} does not support BZPOPMIN; falling back to InMemoryChannelLayer")
+            else:
+                # If we couldn't read version, be conservative and enable only if connection succeeds
+                use_redis_channel = True
+        except Exception as e:
+            print(f"⚠️  Could not probe Redis server at {REDIS_URL}: {e}; using InMemoryChannelLayer")
+
+    if use_redis_channel:
+        CHANNEL_LAYERS = {
+            "default": {
+                "BACKEND": "channels_redis.core.RedisChannelLayer",
+                "CONFIG": {
+                    "hosts": channels_hosts,
+                },
+            },
+        }
+    else:
+        CHANNEL_LAYERS = {
+            "default": {
+                "BACKEND": "channels.layers.InMemoryChannelLayer",
+            },
+        }
+except Exception:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
+
+# If Redis is configured, prefer cache-backed sessions to avoid SQLite 'database is locked' issues
+try:
+    if REDIS_URL and isinstance(REDIS_URL, str) and REDIS_URL.startswith('redis://'):
+        SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+        SESSION_CACHE_ALIAS = 'default'
+except Exception:
+    pass
 
 # API Configuration
 REST_FRAMEWORK = {

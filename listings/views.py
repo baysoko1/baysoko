@@ -29,6 +29,9 @@ from django.db.models import Subquery, OuterRef
 from django.db.models.functions import Coalesce
 from django.utils.decorators import method_decorator
 from storefront.decorators import listing_limit_check
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
+from .models import NewsletterSubscription
 
 
 from notifications.utils import (
@@ -399,6 +402,33 @@ class ListingListView(ListView):
                 user=self.request.user
             ).select_related('listing').order_by('-viewed_at')[:6]
             context['recently_viewed'] = [rv.listing for rv in recently_viewed]
+
+        # Brands for the homepage (distinct non-empty brand names)
+        try:
+            brands_qs = Listing.objects.filter(brand__isnull=False).exclude(brand__exact='').values_list('brand', flat=True).distinct()
+            context['brands'] = list(brands_qs[:24])
+        except Exception:
+            context['brands'] = []
+
+        # Recommended listings: personalized for authenticated users using recently viewed categories, fallback to trending
+        try:
+            recommended = Listing.objects.filter(is_active=True, is_sold=False)
+            if self.request.user.is_authenticated:
+                recent_cats = RecentlyViewed.objects.filter(user=self.request.user).values_list('listing__category', flat=True)[:3]
+                recent_cats = [c for c in recent_cats if c]
+                if recent_cats:
+                    recommended = recommended.filter(category__in=recent_cats)
+            # Exclude items already in recently viewed list for clarity
+            if self.request.user.is_authenticated:
+                rv_ids = RecentlyViewed.objects.filter(user=self.request.user).values_list('listing__id', flat=True)
+                recommended = recommended.exclude(id__in=rv_ids)
+            recommended = recommended.order_by('-date_created')[:8]
+            if not recommended.exists():
+                # Fallback to trending
+                recommended = Listing.objects.filter(is_active=True, is_sold=False).annotate(favorite_count=Count('favorites')).order_by('-favorite_count')[:8]
+            context['recommended_listings'] = recommended
+        except Exception:
+            context['recommended_listings'] = context.get('trending_listings', [])
         
         # Featured users
         context['featured_users'] = User.objects.annotate(
@@ -497,6 +527,44 @@ class ListingListView(ListView):
             context['blog_posts'] = []
 
         return context
+
+
+@require_POST
+@ajax_required
+def newsletter_subscribe(request):
+    """Simple AJAX endpoint to accept email subscriptions from the homepage form.
+
+    Expects JSON payload: {email: 'user@example.com'} or form-encoded `email`.
+    Returns JSON: {success: True, message: '...'}
+    """
+    data = {}
+    try:
+        if request.content_type == 'application/json':
+            payload = json.loads(request.body.decode('utf-8') or '{}')
+            email = payload.get('email')
+        else:
+            email = request.POST.get('email') or request.POST.get('newsletter_email')
+
+        if not email:
+            return JsonResponse({'success': False, 'error': 'Email is required.'}, status=400)
+
+        # Basic validation
+        try:
+            validate_email(email)
+        except ValidationError:
+            return JsonResponse({'success': False, 'error': 'Invalid email address.'}, status=400)
+
+        # Create or update subscription
+        sub, created = NewsletterSubscription.objects.get_or_create(email=email, defaults={'source': 'homepage'})
+        if created:
+            message = 'Subscribed successfully.'
+        else:
+            message = 'Email already subscribed.'
+
+        return JsonResponse({'success': True, 'message': message})
+    except Exception as exc:
+        logger.exception('Error in newsletter_subscribe: %s', exc)
+        return JsonResponse({'success': False, 'error': 'Server error'}, status=500)
 
 class ListingDetailView(DetailView):
     model = Listing

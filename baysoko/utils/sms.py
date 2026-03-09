@@ -1,5 +1,7 @@
 import os
+import time
 import requests
+from requests.exceptions import RequestException, SSLError
 from django.conf import settings
 import logging
 from .phone import normalize_phone_number
@@ -48,23 +50,46 @@ def send_sms_brevo(to_number: str, message: str) -> dict:
 
     logger.debug('Prepared Brevo payload: %s', payload)
 
-    try:
-        resp = requests.post(BREVO_API_URL, json=payload, headers=headers, timeout=8)
+    # Robust send with retries and backoff for transient network/SSL issues
+    max_attempts = getattr(settings, 'BREVO_MAX_ATTEMPTS', 3)
+    backoff_base = getattr(settings, 'BREVO_BACKOFF_BASE', 1)
+    attempt = 0
+    last_exc = None
+    while attempt < max_attempts:
+        attempt += 1
         try:
-            resp.raise_for_status()
-        except requests.HTTPError:
-            # Log response body for easier debugging when Brevo returns 4xx/5xx
-            body = None
+            resp = requests.post(BREVO_API_URL, json=payload, headers=headers, timeout=10)
             try:
-                body = resp.json()
-            except Exception:
-                body = resp.text
-            logger.error('Brevo SMS failed (%s): %s', resp.status_code, body)
-            return {'success': False, 'status_code': resp.status_code, 'body': body}
+                resp.raise_for_status()
+            except requests.HTTPError:
+                body = None
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = resp.text
+                logger.error('Brevo SMS failed (%s): %s', resp.status_code, body)
+                return {'success': False, 'status_code': resp.status_code, 'body': body}
 
-        data = resp.json()
-        logger.info('Brevo SMS sent to %s: %s', to_number, data)
-        return {'success': True, 'response': data}
-    except requests.RequestException as e:
-        logger.exception('Failed to send Brevo SMS: %s', e)
-        return {'success': False, 'error': str(e)}
+            data = resp.json()
+            logger.info('Brevo SMS sent to %s: %s', to_number, data)
+            return {'success': True, 'response': data}
+
+        except SSLError as sx:
+            # SSL handshake issues can be transient; retry a few times
+            last_exc = sx
+            logger.warning('Brevo SSLError on attempt %d/%d: %s', attempt, max_attempts, sx)
+        except RequestException as re:
+            last_exc = re
+            logger.warning('Brevo RequestException on attempt %d/%d: %s', attempt, max_attempts, re)
+
+        # Backoff before next attempt
+        if attempt < max_attempts:
+            sleep_for = backoff_base * (2 ** (attempt - 1)) + (0.5 * attempt)
+            try:
+                time.sleep(sleep_for)
+            except Exception:
+                pass
+
+    # All attempts failed
+    logger.exception('Failed to send Brevo SMS after %d attempts: %s', max_attempts, last_exc)
+    return {'success': False, 'error': str(last_exc)}

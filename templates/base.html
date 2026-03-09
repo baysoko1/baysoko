@@ -15,10 +15,6 @@
         {% endif %}
     </script>
     {% endif %}
-    {% if user.is_authenticated %}
-        {% include 'includes/agent_widget.html' %}
-        <script src="{% static 'js/agent_widget.js' %}"></script>
-    {% endif %}
     <title>Baysoko - {% block title %}Local Marketplace{% endblock %}</title>
    <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16' fill='%23FF6B35'><path d='M3.707 6.464l-1.95 1.95a.5.5 0 0 0 0 .707l4.5 4.5a.5.5 0 0 0 .707 0l1.95-1.95 3.195 3.195a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0 0-.707l-1.95-1.95L12.536 3.707a.5.5 0 0 0-.707 0l-4.5 4.5-4.5-4.5a.5.5 0 0 0-.707 0zm-.873 5.938L7.5 17.07l4.67-4.668 3.808 3.807a1.5 1.5 0 0 1 0 2.122l-4.5 4.5a1.5 1.5 0 0 1-2.122 0l-4.5-4.5a1.5 1.5 0 0 1 0-2.122z'/></svg>">    
     <!-- Modern Fonts -->
@@ -2765,13 +2761,17 @@
                 showToast(`Switched to ${newTheme} mode`, 'info', 2000);
             }
 
-            if (themeToggleMobile) {
-                themeToggleMobile.addEventListener('click', toggleTheme);
-            }
-            
-            if (themeToggleDesktop) {
-                themeToggleDesktop.addEventListener('click', toggleTheme);
-            }
+            // Attach listeners idempotently to avoid double-binding (prevents unexpected behaviour)
+            try {
+                if (themeToggleMobile && !themeToggleMobile.dataset.themeInited) {
+                    themeToggleMobile.addEventListener('click', toggleTheme);
+                    themeToggleMobile.dataset.themeInited = '1';
+                }
+                if (themeToggleDesktop && !themeToggleDesktop.dataset.themeInited) {
+                    themeToggleDesktop.addEventListener('click', toggleTheme);
+                    themeToggleDesktop.dataset.themeInited = '1';
+                }
+            } catch (e) { console.warn('Theme toggle init failed', e); }
 
             // Initialize theme icons
             const currentTheme = document.documentElement.getAttribute('data-theme');
@@ -3578,5 +3578,32 @@
             }
         })();
     </script>
+    {% if user.is_authenticated %}
+        <script>
+            // Ensure theme state is authoritative and synced for all pages,
+            // including authenticated views that load extra widgets.
+            (function(){
+                try {
+                    const stored = localStorage.getItem('theme') || 'light';
+                    const applied = document.documentElement.getAttribute('data-theme') || 'light';
+                    if (applied !== stored) {
+                        document.documentElement.setAttribute('data-theme', stored);
+                    }
+
+                    // Update header toggle icons if present
+                    const iconMobile = document.getElementById('themeIconMobile');
+                    const iconDesktop = document.getElementById('themeIconDesktop');
+                    const cls = stored === 'dark' ? 'bi bi-moon' : 'bi bi-sun';
+                    if (iconMobile) iconMobile.className = cls;
+                    if (iconDesktop) iconDesktop.className = cls;
+
+                    // Broadcast theme change for any widgets (chat, etc.) to react
+                    window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme: stored } }));
+                } catch (e) { console.warn('Theme sync failed', e); }
+            })();
+        </script>
+        {% include 'includes/agent_widget.html' %}
+        <script src="{% static 'js/agent_widget.js' %}"></script>
+    {% endif %}
 </body>
 </html>

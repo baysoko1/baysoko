@@ -127,6 +127,18 @@ class MessageAttachment(models.Model):
                     resource_type=resource_type,
                     secure=True,  # forces https://
                 )
+                # Cloudinary may sometimes return URLs with a resource_type 'auto'
+                # which can produce paths like '/auto/upload/...'. Some CDNs
+                # reject 'auto' for direct image requests. Normalize to the
+                # appropriate resource type for client consumption.
+                if url and '/auto/upload/' in url:
+                    try:
+                        if self.content_type and self.content_type.startswith('image/'):
+                            url = url.replace('/auto/upload/', '/image/upload/')
+                        else:
+                            url = url.replace('/auto/upload/', '/raw/upload/')
+                    except Exception:
+                        pass
                 return url
             except Exception:
                 return str(self.file)

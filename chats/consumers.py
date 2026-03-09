@@ -4,6 +4,10 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from .models import Conversation, Message
+import asyncio
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
+# asgiref.exceptions.TimeoutError is not always available; use asyncio.TimeoutError
+from django.utils import timezone
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -265,7 +269,8 @@ class AgentConsumer(AsyncWebsocketConsumer):
                         return False
 
                 await _create_greeting(self.user.id, greeting)
-                await self.send(text_data=json.dumps({'type': 'generate_response', 'ok': True, 'data': greeting}))
+                # use safe_send to avoid raising when client disconnected
+                await self.safe_send(json.dumps({'type': 'generate_response', 'ok': True, 'data': greeting}))
         except Exception:
             logger.exception('Failed to send initial assistant greeting')
 
@@ -274,6 +279,19 @@ class AgentConsumer(AsyncWebsocketConsumer):
             await self.close()
         except Exception:
             pass
+
+    async def safe_send(self, payload_text):
+        """Send data to websocket but swallow client-disconnects and comparable transport errors.
+
+        Using a small wrapper avoids unhandled exceptions when clients disconnect mid-send (see ConnectionClosedOK).
+        """
+        try:
+            await self.send(text_data=payload_text)
+        except (ConnectionClosedOK, ConnectionClosedError, asyncio.TimeoutError, asyncio.CancelledError) as exc:
+            logger.debug('WebSocket send failed (likely client disconnected): %s', exc)
+        except Exception as exc:
+            # Catch-all to prevent consumer crash; log at debug to avoid noisy logs
+            logger.debug('Unexpected error sending websocket message: %s', exc)
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
@@ -292,11 +310,28 @@ class AgentConsumer(AsyncWebsocketConsumer):
             # Accept optional conversation history for follow-up context
             history = payload.get('history')
             async_generate = sync_to_async(_generate_wrapper, thread_sensitive=False)
+            mode = str(payload.get('mode') or '').strip().lower()
+            request_id = payload.get('request_id')
             # If this looks like a question or conversational prompt, call assistant_reply
             is_question = False
             try:
-                if isinstance(title, str) and ('?' in title or title.strip().lower().startswith(('how', 'what', 'why', 'where', 'when', 'help', 'assist', 'can', 'could', 'would'))):
+                t = str(title).strip().lower() if isinstance(title, str) else ''
+                assistant_starters = (
+                    'how', 'what', 'why', 'where', 'when', 'help', 'assist', 'can', 'could', 'would',
+                    'add', 'remove', 'show', 'find', 'track', 'list', 'tell', 'give', 'check', 'view'
+                )
+                assistant_keywords = (
+                    'cart', 'order', 'orders', 'subscription', 'plan', 'store', 'listing', 'listings',
+                    'inventory', 'stock', 'worth', 'price', 'expensive', 'cheap', 'new arrivals',
+                    'favorites', 'favourites', 'recently viewed', 'checkout'
+                )
+                if mode == 'assistant':
                     is_question = True
+                elif mode == 'listing_fields':
+                    is_question = False
+                elif isinstance(title, str):
+                    if ('?' in t) or t.startswith(assistant_starters) or any(k in t for k in assistant_keywords):
+                        is_question = True
             except Exception:
                 is_question = False
 
@@ -305,13 +340,16 @@ class AgentConsumer(AsyncWebsocketConsumer):
                 from asgiref.sync import sync_to_async
                 async_assist = sync_to_async(_assistant_wrapper, thread_sensitive=False)
                 text = await async_assist(title, history, getattr(self.user, 'id', None))
-                await self.send(text_data=json.dumps({'type': 'generate_response', 'ok': True, 'data': text}))
+                await self.safe_send(json.dumps({'type': 'generate_response', 'ok': True, 'data': text, 'mode': mode or 'assistant', 'request_id': request_id}))
             else:
                 result = await async_generate(title, history)
-                await self.send(text_data=json.dumps({'type': 'generate_response', 'ok': True, 'data': result}))
+                await self.safe_send(json.dumps({'type': 'generate_response', 'ok': True, 'data': result, 'mode': mode or 'listing_fields', 'request_id': request_id}))
         except Exception as e:
             logger.exception('AgentConsumer error')
-            await self.send(text_data=json.dumps({'type': 'generate_response', 'ok': False, 'error': str(e)}))
+            try:
+                await self.safe_send(json.dumps({'type': 'generate_response', 'ok': False, 'error': str(e)}))
+            except Exception:
+                logger.debug('Failed to send error response to agent websocket client')
 
 
 def _generate_wrapper(title: str, history=None):

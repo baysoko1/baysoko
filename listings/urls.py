@@ -61,5 +61,7 @@ urlpatterns = [
     # AJAX endpoints for inline edit/delete with WebSocket broadcasts
     path('ajax/listing/<int:listing_id>/edit/', views.ajax_edit_listing, name='ajax_edit_listing'),
     path('ajax/listing/<int:listing_id>/delete/', views.ajax_delete_listing, name='ajax_delete_listing'),
+    # Newsletter subscription endpoint used by homepage AJAX form
+    path('newsletter/subscribe/', views.newsletter_subscribe, name='newsletter_subscribe'),
     
 ]
