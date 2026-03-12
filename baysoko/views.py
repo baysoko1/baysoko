@@ -1,5 +1,6 @@
 from django.shortcuts import render
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
+from django.contrib.staticfiles import finders
 from django.views.decorators.csrf import csrf_exempt
 import json
 import os
@@ -53,3 +54,27 @@ def client_error_log(request):
 def health(request):
     """Simple health check used by load balancers and platform health checks."""
     return JsonResponse({'status': 'ok'}, status=200)
+
+
+def service_worker(request):
+    """Serve the PWA service worker at the root scope."""
+    sw_path = finders.find('service-worker.js')
+    if not sw_path:
+        return HttpResponse('', content_type='application/javascript', status=404)
+    try:
+        with open(sw_path, 'rb') as fh:
+            return HttpResponse(fh.read(), content_type='application/javascript')
+    except Exception:
+        return HttpResponse('', content_type='application/javascript', status=500)
+
+
+def manifest(request):
+    """Serve the PWA manifest at the root for installability."""
+    manifest_path = finders.find('manifest.json')
+    if not manifest_path:
+        return HttpResponse('', content_type='application/manifest+json', status=404)
+    try:
+        with open(manifest_path, 'rb') as fh:
+            return HttpResponse(fh.read(), content_type='application/manifest+json')
+    except Exception:
+        return HttpResponse('', content_type='application/manifest+json', status=500)

@@ -17,6 +17,9 @@
     {% endif %}
     <title>Baysoko - {% block title %}Local Marketplace{% endblock %}</title>
    <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16' fill='%23FF6B35'><path d='M3.707 6.464l-1.95 1.95a.5.5 0 0 0 0 .707l4.5 4.5a.5.5 0 0 0 .707 0l1.95-1.95 3.195 3.195a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0 0-.707l-1.95-1.95L12.536 3.707a.5.5 0 0 0-.707 0l-4.5 4.5-4.5-4.5a.5.5 0 0 0-.707 0zm-.873 5.938L7.5 17.07l4.67-4.668 3.808 3.807a1.5 1.5 0 0 1 0 2.122l-4.5 4.5a1.5 1.5 0 0 1-2.122 0l-4.5-4.5a1.5 1.5 0 0 1 0-2.122z'/></svg>">    
+    <link rel="manifest" href="{% url 'manifest' %}">
+    <meta name="theme-color" content="#ff6b35">
+    <link rel="apple-touch-icon" href="{% static 'icons/icon-192x192.png' %}">
     <!-- Modern Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -45,6 +48,56 @@
         /* Add safe area inset for iOS notch */
         .safe-area-top {
             padding-top: env(safe-area-inset-top);
+        }
+
+        .pwa-install-banner {
+            position: sticky;
+            top: 0;
+            z-index: 1050;
+            background: linear-gradient(120deg, rgba(255,107,53,0.18), rgba(0,0,0,0.2));
+            border-bottom: 1px solid rgba(255,107,53,0.35);
+            backdrop-filter: blur(12px);
+            animation: pwaSlideDown 0.45s ease-out;
+        }
+        .pwa-install-banner.hidden {
+            display: none;
+        }
+        .pwa-install-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 10px 16px;
+        }
+        .pwa-install-text {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+        }
+        .pwa-install-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .pwa-close-btn {
+            background: transparent;
+            border: 0;
+            color: var(--text-muted);
+        }
+        @keyframes pwaSlideDown {
+            from { transform: translateY(-100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @media (max-width: 768px) {
+            .pwa-install-inner {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .pwa-install-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
         }
     </style>
     <script>
@@ -1936,6 +1989,11 @@
                                     </span>
                                 </a>
                             </li>
+                            <li>
+                                <a class="dropdown-item" href="{% url 'affiliates:dashboard' %}">
+                                    <i class="bi bi-people me-2"></i>Affiliate Dashboard
+                                </a>
+                            </li>
                             
                             <!-- Subscription Management -->
                             {% with user_stores=user_stores %}
@@ -2907,14 +2965,25 @@
             
             // Global Cart Update Handler
             function handleGlobalCartUpdate(itemCount, total) {
+                const safeCount = Number.isFinite(Number(itemCount)) ? Math.max(0, Number(itemCount)) : 0;
+                const safeTotal = Number.isFinite(Number(total)) ? Math.max(0, Number(total)) : 0;
                 // Update BadgeManager
-                window.BadgeManager.update('cart', itemCount);
+                window.BadgeManager.update('cart', safeCount);
                 
                 // Update cart totals in header
-                const cartTotalElements = document.querySelectorAll('.cart-total');
+                let cartTotalElements = document.querySelectorAll('.cart-total');
+                if (!cartTotalElements.length) {
+                    document.querySelectorAll('.cart-header-link .cart-text').forEach(wrapper => {
+                        const totalEl = document.createElement('span');
+                        totalEl.className = 'cart-total';
+                        totalEl.style.display = 'none';
+                        wrapper.appendChild(totalEl);
+                    });
+                    cartTotalElements = document.querySelectorAll('.cart-total');
+                }
                 cartTotalElements.forEach(element => {
-                    if (itemCount > 0) {
-                        element.textContent = `KSh ${parseFloat(total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    if (safeCount > 0) {
+                        element.textContent = `KSh ${safeTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                         element.style.display = 'inline';
                     } else {
                         element.style.display = 'none';
@@ -2924,20 +2993,23 @@
                 // Update cart empty text
                 const cartEmptyElements = document.querySelectorAll('.cart-empty-text');
                 cartEmptyElements.forEach(element => {
-                    element.style.display = itemCount > 0 ? 'none' : 'inline';
+                    element.textContent = 'KSh 0';
+                    element.style.display = safeCount > 0 ? 'none' : 'inline';
                 });
                 
                 // Dispatch event for cart page to update
                 document.dispatchEvent(new CustomEvent('globalCartUpdated', {
-                    detail: { itemCount, total }
+                    detail: { itemCount: safeCount, total: safeTotal }
                 }));
                 
-                console.log('Global cart updated:', { itemCount, total });
+                console.log('Global cart updated:', { itemCount: safeCount, total: safeTotal });
             }
             
             // Listen for cart update events from any page
             document.addEventListener('cartUpdated', function(event) {
-                const { itemCount, total } = event.detail;
+                const detail = event.detail || {};
+                const itemCount = detail.itemCount;
+                const total = detail.total;
                 handleGlobalCartUpdate(itemCount, total);
             });
             
@@ -3488,6 +3560,15 @@
     </script>
 
     {% endblock %}
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+        appId: "a045aeba-3624-4edc-80d1-d165620699aa",
+        });
+    });
+    </script>
 
     <!-- Include global AJAX handler -->
     <script src="{% static 'js/global-ajax-handler.js' %}"></script>
@@ -3578,6 +3659,21 @@
             }
         })();
     </script>
+    <div id="pwaInstallBanner" class="pwa-install-banner hidden">
+        <div class="pwa-install-inner container">
+            <div class="pwa-install-text">
+                <i class="bi bi-phone"></i>
+                <span>Install Baysoko for faster access and offline support.</span>
+            </div>
+            <div class="pwa-install-actions">
+                <button id="pwaInstallBtn" class="btn-custom btn-primary" type="button">Install</button>
+                <button id="pwaInstallClose" class="pwa-close-btn" type="button" aria-label="Close install banner">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     {% if user.is_authenticated %}
         <script>
             // Ensure theme state is authoritative and synced for all pages,
@@ -3604,6 +3700,69 @@
         </script>
         {% include 'includes/agent_widget.html' %}
         <script src="{% static 'js/agent_widget.js' %}"></script>
+    {% endif %}
+    <script>
+        (function() {
+            if (!('serviceWorker' in navigator)) return;
+            navigator.serviceWorker.register("{% url 'service_worker' %}")
+                .then(() => console.log('PWA service worker registered'))
+                .catch((err) => console.warn('PWA service worker failed', err));
+
+            let deferredPrompt = null;
+            const installBtn = document.getElementById('pwaInstallBtn');
+            const banner = document.getElementById('pwaInstallBanner');
+            const closeBtn = document.getElementById('pwaInstallClose');
+            const dismissedKey = 'baysoko_pwa_banner_dismissed';
+            window.addEventListener('beforeinstallprompt', (event) => {
+                event.preventDefault();
+                deferredPrompt = event;
+                try {
+                    if (localStorage.getItem(dismissedKey) === '1') return;
+                } catch (e) {}
+                if (banner) banner.classList.remove('hidden');
+            });
+            if (installBtn) {
+                installBtn.addEventListener('click', async () => {
+                    if (!deferredPrompt) return;
+                    deferredPrompt.prompt();
+                    try { await deferredPrompt.userChoice; } catch (e) {}
+                    deferredPrompt = null;
+                    if (banner) banner.classList.add('hidden');
+                });
+            }
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    if (banner) banner.classList.add('hidden');
+                    try { localStorage.setItem(dismissedKey, '1'); } catch (e) {}
+                });
+            }
+            window.addEventListener('appinstalled', () => {
+                if (banner) banner.classList.add('hidden');
+            });
+        })();
+    </script>
+    {% if ONESIGNAL_APP_ID %}
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.js" defer></script>
+    <script>
+        window.OneSignalDeferred = window.OneSignalDeferred || [];
+        OneSignalDeferred.push(async function(OneSignal) {
+            await OneSignal.init({
+                appId: "{{ ONESIGNAL_APP_ID }}",
+                serviceWorkerPath: "/static/onesignal/OneSignalSDKWorker.js",
+                serviceWorkerUpdaterPath: "/static/onesignal/OneSignalSDKUpdaterWorker.js",
+                notifyButton: { enable: false }
+            });
+            {% if user.is_authenticated %}
+            try {
+                await OneSignal.login("{{ user.id }}");
+            } catch (e) {}
+            {% else %}
+            try {
+                await OneSignal.logout();
+            } catch (e) {}
+            {% endif %}
+        });
+    </script>
     {% endif %}
 </body>
 </html>

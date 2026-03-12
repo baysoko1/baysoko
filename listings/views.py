@@ -168,7 +168,7 @@ class ListingListView(ListView):
                 try:
                     cart, _ = Cart.objects.get_or_create(user=request.user)
                     cart_total = cart.get_total_price()
-                    cart_item_count = cart.items.count()
+                    cart_item_count = sum(int(item.quantity or 0) for item in cart.items.all())
                 except Exception as e:
                     logger.warning(f"Error getting cart: {e}")
 
@@ -305,7 +305,7 @@ class ListingListView(ListView):
                 cart, created = Cart.objects.get_or_create(user=self.request.user)
                 cart_items = {str(item.listing.id): item.quantity for item in cart.items.all()}
                 cart_total = cart.get_total_price()
-                cart_item_count = cart.items.count()
+                cart_item_count = sum(int(item.quantity or 0) for item in cart.items.all())
             except Exception as e:
                 print(f"Cart error in home view: {str(e)}")
                 cart_total = 0
@@ -1280,7 +1280,7 @@ def all_listings(request):
             cart, created = Cart.objects.get_or_create(user=request.user)
             cart_items = {str(item.listing.id): item.quantity for item in cart.items.all()}
             cart_total = cart.get_total_price()
-            cart_item_count = cart.items.count()
+            cart_item_count = sum(int(item.quantity or 0) for item in cart.items.all())
         except Exception as e:
             print(f"Cart error: {str(e)}")
             # If cart doesn't exist, create one
@@ -1642,7 +1642,7 @@ def get_cart_items(request):
     
     return JsonResponse({
         'cart_items': items_data,
-        'cart_item_count': cart.items.count(),
+        'cart_item_count': sum(int(item.quantity or 0) for item in cart.items.all()),
         'cart_total': str(cart.get_total_price())
     })
 
@@ -1670,7 +1670,7 @@ def cart_summary(request):
 
         data = {
             'cart_total': float(cart.get_total_price()),
-            'cart_item_count': cart.items.count(),
+            'cart_item_count': sum(int(item.quantity or 0) for item in cart.items.all()),
             'item_totals': item_totals,
         }
         return JsonResponse(data)
@@ -1798,7 +1798,7 @@ def view_cart(request):
         cart_data = {
             'items': [],
             'total_price': float(cart.get_total_price()),
-            'item_count': cart.items.count()
+            'item_count': sum(int(item.quantity or 0) for item in cart.items.all())
         }
         
         for item in cart.items.all():
@@ -1860,7 +1860,7 @@ def update_cart_item(request, item_id):
     
     # Get updated cart totals
     cart.refresh_from_db()
-    item_count = cart.items.count()
+    item_count = sum(int(item.quantity or 0) for item in cart.items.all())
     cart_total = cart.get_total_price()
     
     # Calculate individual item totals for UI updates
@@ -1920,7 +1920,7 @@ def remove_from_cart(request, item_id):
     
     # Get updated cart totals
     cart.refresh_from_db()
-    item_count = cart.items.count()
+    item_count = sum(int(item.quantity or 0) for item in cart.items.all())
     cart_total = cart.get_total_price()
     
     # Broadcast cart update to current user's notification group
@@ -1958,7 +1958,7 @@ def remove_from_cart(request, item_id):
 def clear_cart(request):
     """Clear entire cart - FIXED RESPONSE"""
     cart = get_object_or_404(Cart, user=request.user)
-    cart_items_count = cart.items.count()
+    cart_items_count = sum(int(item.quantity or 0) for item in cart.items.all())
     
     # Clear all items
     cart.items.all().delete()
@@ -2076,7 +2076,7 @@ def add_to_cart(request, listing_id):
     
     # Get updated cart info
     cart.refresh_from_db()
-    cart_item_count = cart.items.count()
+    cart_item_count = sum(int(item.quantity or 0) for item in cart.items.all())
     cart_total = float(cart.get_total_price())
     
     response_data = {

@@ -3057,6 +3057,9 @@ async function fetchUnifiedMessages(participantId) {
                         const msgId = m && m.id !== undefined && m.id !== null ? String(m.id) : '';
                         const isIncoming = m && (m.sender_id !== window.currentUserId) && !m.is_own;
                         if (msgId && isIncoming) incomingAnimatedMessageIds.add(msgId);
+                        if (isIncoming && isAssistantMessage(m)) {
+                            m._sync_cart = true;
+                        }
                     });
                     allMessages.push(...newMsgs);
                     lastMessageId = Math.max(...newMsgs.map(m => m.id));
@@ -3259,11 +3262,13 @@ function renderMessageBubble(msg) {
     try {
         // If the message content is already an object (newer API), render it directly
         if (msg.content && typeof msg.content === 'object') {
-            contentHtml = formatStructuredMessage(msg.content);
+            const shouldSyncCart = (!!msg._sync_cart) || (!isOwn && isAssistantMessage(msg) && isRecentMessage(msg.timestamp));
+            contentHtml = formatStructuredMessage(msg.content, shouldSyncCart);
         } else if (msg.content && (String(msg.content).trim().startsWith('{') || String(msg.content).trim().startsWith('['))) {
             const parsed = parseJsonObject(String(msg.content));
             if (parsed && typeof parsed === 'object') {
-                contentHtml = formatStructuredMessage(parsed);
+                const shouldSyncCart = (!!msg._sync_cart) || (!isOwn && isAssistantMessage(msg) && isRecentMessage(msg.timestamp));
+                contentHtml = formatStructuredMessage(parsed, shouldSyncCart);
             } else {
                 contentHtml = '<div>' + escapeHtml(String(msg.content || '')) + '</div>';
             }
@@ -3296,7 +3301,28 @@ function renderMessageBubble(msg) {
 }
 
 // Render structured assistant messages similarly to agent widget
-function formatStructuredMessage(d) {
+function isAssistantMessage(msg) {
+    try {
+        if (!msg || typeof msg !== 'object') return false;
+        if (msg.is_assistant === true || msg.sender_role === 'assistant' || msg.participant_role === 'assistant') return true;
+        const name = String(msg.sender_name || msg.participant_name || msg.sender_username || '').toLowerCase();
+        return name.includes('assistant');
+    } catch (e) {
+        return false;
+    }
+}
+
+function isRecentMessage(ts, maxMinutes = 10) {
+    try {
+        const t = new Date(ts).getTime();
+        if (!t) return false;
+        return (Date.now() - t) <= (maxMinutes * 60 * 1000);
+    } catch (e) {
+        return false;
+    }
+}
+
+function formatStructuredMessage(d, shouldSyncCart) {
     if (!d || typeof d !== 'object') {
         return '<div>' + escapeHtml(String(d || '')) + '</div>';
     }
@@ -3306,7 +3332,9 @@ function formatStructuredMessage(d) {
             d = Object.assign({}, d, nested);
         }
     }
-    syncCartStateFromAssistantPayload(d);
+    if (shouldSyncCart) {
+        syncCartStateFromAssistantPayload(d);
+    }
     let html = '';
     if (d.text) html += '<div class="agent-desc">' + formatAssistantText(d.text) + '</div>';
     else if (d.description) html += '<div class="agent-desc">' + formatAssistantText(d.description) + '</div>';
@@ -3586,6 +3614,7 @@ async function sendMessage() {
             }
             if (data.assistant_message && data.assistant_message.id && !allMessages.some(m => m.id === data.assistant_message.id)) {
                 const aiMsg = data.assistant_message;
+                aiMsg._sync_cart = true;
                 allMessages.push(aiMsg);
                 incomingAnimatedMessageIds.add(String(aiMsg.id));
                 lastMessageId = Math.max(lastMessageId, aiMsg.id);

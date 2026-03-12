@@ -58,3 +58,14 @@ def global_counts(request) -> Dict[str, int]:
 		'cart_item_count': cart_item_count,
 		'cart_total': cart_total,
 	}
+
+
+def onesignal_config(request) -> Dict[str, str]:
+	"""Expose OneSignal config to templates."""
+	try:
+		from django.conf import settings
+		return {
+			'ONESIGNAL_APP_ID': getattr(settings, 'ONESIGNAL_APP_ID', ''),
+		}
+	except Exception:
+		return {'ONESIGNAL_APP_ID': ''}

@@ -820,33 +820,82 @@ def _try_resolve_listing_for_cart(prompt, context=None):
     try:
         from listings.models import Listing
         raw = str(prompt or '').strip()
-        # title-based resolution from prompt
+        pronouns = {'it', 'this', 'that'}
+
+        def _clean_query(q):
+            q = str(q or '').strip()
+            q = re.sub(r"^\d+\s+(?:x\s+|of\s+)?", "", q, flags=re.I).strip()
+            q = re.sub(r"^(?:my\s+)?(?:cart\s+)?", "", q, flags=re.I).strip()
+            q = re.sub(r"\s+(?:to\s+cart|in\s+cart)$", "", q, flags=re.I).strip()
+            q = re.sub(r"\s+(?:please|now)$", "", q, flags=re.I).strip()
+            q = re.sub(r"\s+", " ", q)
+            return q
+
+        def _score_candidate(query_text, listing_obj):
+            q_low = str(query_text or '').strip().lower()
+            title_low = str(getattr(listing_obj, 'title', '') or '').strip().lower()
+            if not q_low or not title_low:
+                return 0.0
+            if title_low == q_low:
+                return 1000.0
+            q_tokens = {t for t in re.findall(r"[a-z0-9]+", q_low) if len(t) > 1}
+            t_tokens = {t for t in re.findall(r"[a-z0-9]+", title_low) if len(t) > 1}
+            overlap = len(q_tokens & t_tokens)
+            ratio = difflib.SequenceMatcher(a=q_low, b=title_low).ratio()
+            starts = 1.0 if title_low.startswith(q_low) else 0.0
+            return (overlap * 10.0) + (ratio * 6.0) + (starts * 5.0)
+
+        def _resolve_by_query(query_text):
+            q = _clean_query(query_text)
+            if not q:
+                return None
+            q_low = q.lower()
+            if q_low in pronouns:
+                return None
+            qs = Listing.objects.filter(is_active=True, is_sold=False)
+            exact = qs.filter(title__iexact=q).order_by('-date_created').first()
+            if exact:
+                return exact
+            starts = qs.filter(title__istartswith=q).order_by('-date_created')[:10]
+            if starts:
+                ranked = sorted(starts, key=lambda l: (_score_candidate(q, l), getattr(l, 'date_created', None)), reverse=True)
+                return ranked[0]
+            contains = list(qs.filter(title__icontains=q).order_by('-date_created')[:25])
+            if not contains:
+                return None
+            ranked = sorted(contains, key=lambda l: (_score_candidate(q, l), getattr(l, 'date_created', None)), reverse=True)
+            if not ranked:
+                return None
+            top = ranked[0]
+            top_score = _score_candidate(q, top)
+            second_score = _score_candidate(q, ranked[1]) if len(ranked) > 1 else -1.0
+            # Avoid auto-picking when the match is weak or ambiguous.
+            if top_score < 6.0:
+                return None
+            if second_score >= 0 and (top_score - second_score) < 1.5:
+                return None
+            return top
+
+        query = None
         m = re.search(r"add\s+(?:the\s+)?(.+?)\s+to\s+(?:my\s+)?cart", raw, re.I)
         if m:
-            q = m.group(1).strip()
-            # Normalize quantity phrases, e.g. "3 ugali", "3 of ugali"
-            q = re.sub(r"^\d+\s+(?:x\s+|of\s+)?", "", q, flags=re.I).strip()
-            if q and q.lower() not in {'it', 'this', 'that'}:
-                l = Listing.objects.filter(title__icontains=q, is_active=True, is_sold=False).order_by('-date_created').first()
+            query = m.group(1).strip()
+        if not query:
+            m2 = re.search(r"add\s+(?:the\s+)?(?:\d+\s+)?(?:x\s+)?(?:items?\s+of\s+|units?\s+of\s+|pieces?\s+of\s+)?(.+?)(?:\s+please|\s+now|[?.!,]|$)", raw, re.I)
+            if m2:
+                query = m2.group(1).strip()
+        resolved = _resolve_by_query(query) if query else None
+        if resolved:
+            return resolved
+
+        # Fallback to recent context only for pronouns / unspecified item references.
+        low = raw.lower()
+        if (not query) or (_clean_query(query).lower() in pronouns) or re.search(r"\b(add|put)\s+(it|this|that)\b", low):
+            recent = _extract_listing_from_history(context)
+            if recent and recent.get('id'):
+                l = Listing.objects.filter(pk=recent.get('id'), is_active=True, is_sold=False).first()
                 if l:
                     return l
-        # Also handle: "add 5 items of Bees Wax", "add 3 Ugali please"
-        m2 = re.search(r"add\s+(?:the\s+)?(?:\d+\s+)?(?:x\s+)?(?:items?\s+of\s+|units?\s+of\s+|pieces?\s+of\s+)?(.+?)(?:\s+please|\s+now|[?.!,]|$)", raw, re.I)
-        if m2:
-            q = m2.group(1).strip()
-            q = re.sub(r"^(?:my\s+)?(?:cart\s+)?", "", q, flags=re.I).strip()
-            q = re.sub(r"^\d+\s+(?:x\s+|of\s+)?", "", q, flags=re.I).strip()
-            q = re.sub(r"\s+(?:to\s+cart|in\s+cart)$", "", q, flags=re.I).strip()
-            if q and q.lower() not in {'it', 'this', 'that'}:
-                l = Listing.objects.filter(title__icontains=q, is_active=True, is_sold=False).order_by('-date_created').first()
-                if l:
-                    return l
-        # fallback to context "it/this"
-        recent = _extract_listing_from_history(context)
-        if recent and recent.get('id'):
-            l = Listing.objects.filter(pk=recent.get('id'), is_active=True, is_sold=False).first()
-            if l:
-                return l
     except Exception:
         logger.debug('_try_resolve_listing_for_cart failed', exc_info=True)
     return None
@@ -1331,7 +1380,7 @@ def assistant_reply(prompt: str, context=None, user_id=None):
             except Exception:
                 logger.debug('Store owner retrieval failed', exc_info=True)
 
-    if retrieval_text is None and re.search(r"\b(subscription|subscriptions|subscribe|cancel subscription|renew subscription|my subscription)\b", low):
+    if retrieval_text is None and re.search(r"\b(subscription|subscriptions|subscribe|cancel subscription|renew subscription|my subscription|plan|plans|billing)\b", low):
         try:
             res_text, items = _handle_subscription_intent(prompt, user_id)
             retrieval_text = res_text
@@ -2373,24 +2422,43 @@ def _handle_subscription_intent(prompt: str, user_id=None):
             if not target_sub:
                 target_sub = subs_qs.first()
 
-        if 'my subscription' in low or 'subscription status' in low or 'what is my subscription' in low:
+        asks_status = bool(re.search(r"\b(my subscription|subscription status|what is my subscription|what plan am i on|my plan|current plan|which plan)\b", low))
+        asks_available = bool(re.search(r"\b(list plans|plans|what plans|available plans|available subscriptions|subscription plans|show plans)\b", low))
+
+        if asks_status:
             if not user:
                 return ('Please sign in to view your subscriptions.', [])
             summary = SubscriptionService.get_subscription_summary(user)
-            text = f"You have {summary.get('total_stores',0)} store(s). Active subscriptions: {summary.get('active_subscriptions',0)}."
+            text = (
+                f"You have {summary.get('total_stores',0)} store(s). "
+                f"Active subscriptions: {summary.get('active_subscriptions',0)}."
+            )
             items = []
             active_subs = Subscription.objects.filter(store__owner=user).select_related('store').order_by('-created_at')[:8]
             for sub in active_subs:
+                plan = (getattr(sub, 'plan', None) or getattr(sub, 'plan_name', None) or 'unknown')
                 items.append({
                     'type': 'subscription',
                     'id': sub.id,
                     'store_name': sub.store.name,
-                    'plan': getattr(sub, 'plan', None) or getattr(sub, 'plan_name', None),
+                    'plan': plan,
                     'status': sub.status,
                     'price': str(getattr(sub, 'amount', '')),
                     'expires': sub.current_period_end.isoformat() if sub.current_period_end else None,
                     'url': f"/storefront/dashboard/store/{sub.store.slug}/subscription/manage/",
                 })
+            if not items:
+                stores = Store.objects.filter(owner=user).order_by('-created_at')[:5]
+                items = [{
+                    'type': 'subscription',
+                    'id': s.id,
+                    'store_name': s.name,
+                    'status': 'no_subscription',
+                    'plan': 'none',
+                    'url': f"/storefront/dashboard/store/{s.slug}/subscription/manage/",
+                    'reason': 'Open this store subscription page.',
+                } for s in stores]
+                text += " No active subscription found yet."
             return (text, items)
 
         if re.search(r"\b(manage subscription|open subscription|subscription page|billing page)\b", low):
@@ -2489,9 +2557,12 @@ def _handle_subscription_intent(prompt: str, user_id=None):
                 'url': f"/storefront/dashboard/store/{sub.store.slug}/subscription/manage/",
             }])
 
-        if 'list plans' in low or low.strip() == 'plans' or 'what plans' in low:
+        if asks_available:
             plans = SubscriptionService.get_display_plans()
-            text = 'Available plans: ' + ', '.join([f"{k} ({v['price']})" for k,v in plans.items()])
+            text = 'Available plans: ' + ', '.join([
+                f"{k.title()} (KSh {float(v.get('price', 0) or 0):,.0f}/{v.get('period', 'month')})"
+                for k, v in plans.items()
+            ])
             items = []
             for k, v in plans.items():
                 items.append({

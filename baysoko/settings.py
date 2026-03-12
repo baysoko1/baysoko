@@ -210,6 +210,7 @@ INSTALLED_APPS = [
     'blog.apps.BlogConfig',
     'notifications.apps.NotificationsConfig',
     'storefront.apps.StorefrontConfig',
+    'affiliates.apps.AffiliatesConfig',
 ]
 
 REST_FRAMEWORK = {
@@ -239,6 +240,7 @@ MIDDLEWARE = [
     'baysoko.middleware_async_stream.StreamingContentFixMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'affiliates.middleware.AffiliateMiddleware',
     'baysoko.middleware.ClearCorruptedSessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -254,6 +256,8 @@ MIDDLEWARE = [
     'storefront.middleware.StoreViewMiddleware',
     'chats.middleware.OnlineStatusMiddleware',
 ]
+
+ 
 
 ROOT_URLCONF = 'baysoko.urls'
 
@@ -283,6 +287,7 @@ TEMPLATES = [
                 'storefront.context_processors.subscription_context',
                 'blog.context_processors.blog_sidebar',
                 'baysoko.context_processors.global_counts',
+                'baysoko.context_processors.onesignal_config',
             ],
         },
     },
@@ -460,6 +465,12 @@ else:
 SITE_ID = 1
 SITE_URL = config('SITE_URL', default='http://localhost:8000')
 
+# Affiliate program (native)
+AFFILIATE_QUERY_PARAM = 'aid'
+AFFILIATE_COOKIE_NAME = 'baysoko_affiliate'
+AFFILIATE_COOKIE_AGE = 60 * 60 * 24 * 30  # 30 days
+AFFILIATE_DEFAULT_RATE = Decimal('0.05')
+
 # CSRF and Cross-Origin Configuration
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:8000',
@@ -632,6 +643,11 @@ SOCIALACCOUNT_AUTO_SIGNUP = True
 AFRICASTALKING_USERNAME = os.environ.get('AFRICASTALKING_USERNAME', '')
 AFRICASTALKING_API_KEY = os.environ.get('AFRICASTALKING_API_KEY', '')
 SMS_ENABLED = os.environ.get('SMS_ENABLED', 'False').lower() == 'true'
+
+# OneSignal push configuration
+ONESIGNAL_APP_ID = os.environ.get('ONESIGNAL_APP_ID', '')
+ONESIGNAL_API_KEY = os.environ.get('ONESIGNAL_API_KEY', '')
+ONESIGNAL_REST_URL = os.environ.get('ONESIGNAL_REST_URL', 'https://onesignal.com/api/v1/notifications')
 
 # Delivery System Integration
 # Delivery settings

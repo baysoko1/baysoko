@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% load humanize %}
+
+{% block title %}Affiliate Dashboard{% endblock %}
+
+{% block content %}
+<section class="container py-5">
+    <div class="row g-4">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                        <div>
+                            <h3 class="mb-1">Affiliate Dashboard</h3>
+                            <p class="text-muted mb-0">Track your referrals, commissions, and share your affiliate link.</p>
+                        </div>
+                        <a class="btn-custom btn-ghost" href="{% url 'affiliates:commissions' %}">
+                            View commissions
+                        </a>
+                        <a class="btn-custom btn-ghost" href="{% url 'affiliates:terms' %}">
+                            Program terms
+                        </a>
+                    </div>
+                    <hr>
+                    <div class="row g-3">
+                        <div class="col-lg-6">
+                            <div class="p-3 rounded-4" style="background: var(--card-bg, rgba(255,255,255,0.02)); border: 1px solid rgba(255,107,53,0.15);">
+                                <div class="text-uppercase text-muted small mb-2">Your affiliate link</div>
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    <input class="form-control" type="text" value="{{ affiliate_link }}" readonly>
+                                    <button class="btn-custom btn-primary" type="button" onclick="navigator.clipboard.writeText('{{ affiliate_link }}')">
+                                        Copy link
+                                    </button>
+                                </div>
+                                <div class="text-muted small mt-2">Share this link to earn commissions when new customers purchase.</div>
+                            </div>
+                        </div>
+                        <div class="col-lg-6">
+                            <div class="p-3 rounded-4" style="background: var(--card-bg, rgba(255,255,255,0.02)); border: 1px solid rgba(255,107,53,0.15);">
+                                <div class="text-uppercase text-muted small mb-2">Affiliate code</div>
+                                <div class="h4 mb-0">{{ affiliate_profile.code }}</div>
+                                <div class="text-muted small mt-2">Default rate: {{ affiliate_profile.default_rate|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="row g-3">
+                <div class="col-md-3 col-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="text-muted small">Clicks</div>
+                            <div class="h3 mb-0">{{ stats.clicks }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="text-muted small">Referrals</div>
+                            <div class="h3 mb-0">{{ stats.referrals }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="text-muted small">Pending (KSh)</div>
+                            <div class="h3 mb-0">{{ stats.pending_amount|floatformat:2|intcomma }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="text-muted small">Paid (KSh)</div>
+                            <div class="h3 mb-0">{{ stats.paid_amount|floatformat:2|intcomma }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent commissions</h5>
+                    </div>
+                    <div class="table-responsive mt-3">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Order</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if recent_commissions %}
+                                    {% for commission in recent_commissions %}
+                                    <tr>
+                                        <td>#{{ commission.order.id }}</td>
+                                        <td>KSh {{ commission.amount|floatformat:2|intcomma }}</td>
+                                        <td><span class="badge bg-secondary text-uppercase">{{ commission.status }}</span></td>
+                                        <td>{{ commission.created_at|date:"M d, Y" }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="4" class="text-muted">No commissions yet.</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

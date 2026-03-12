@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% load humanize %}
+
+{% block title %}Affiliate Commissions{% endblock %}
+
+{% block content %}
+<section class="container py-5">
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div>
+                    <h3 class="mb-1">Affiliate Commissions</h3>
+                    <p class="text-muted mb-0">All commissions generated from your referrals.</p>
+                </div>
+                <a class="btn-custom btn-ghost" href="{% url 'affiliates:dashboard' %}">Back to dashboard</a>
+            </div>
+            <div class="table-responsive mt-3">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if commissions %}
+                            {% for commission in commissions %}
+                            <tr>
+                                <td>#{{ commission.order.id }}</td>
+                                <td>KSh {{ commission.amount|floatformat:2|intcomma }}</td>
+                                <td><span class="badge bg-secondary text-uppercase">{{ commission.status }}</span></td>
+                                <td>{{ commission.created_at|date:"M d, Y" }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="4" class="text-muted">No commissions yet.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4">
+                <h5 class="mb-2">Recent payouts</h5>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Reference</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if payouts %}
+                                {% for payout in payouts %}
+                                <tr>
+                                    <td>KSh {{ payout.amount|floatformat:2|intcomma }}</td>
+                                    <td><span class="badge bg-secondary text-uppercase">{{ payout.status }}</span></td>
+                                    <td>{{ payout.reference|default:"-" }}</td>
+                                    <td>{{ payout.created_at|date:"M d, Y" }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr><td colspan="4" class="text-muted">No payouts yet.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

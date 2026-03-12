@@ -1,0 +1,22 @@
+{
+  "name": "Baysoko",
+  "short_name": "Baysoko",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f0f10",
+  "theme_color": "#ff6b35",
+  "description": "Baysoko marketplace for buying, selling, stores, subscriptions, and orders.",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

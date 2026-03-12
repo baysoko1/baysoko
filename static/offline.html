@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Baysoko is offline</title>
+  <meta name="theme-color" content="#ff6b35">
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at top, #1b1b1d, #0f0f10 60%);
+      color: #f5f5f5;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .card {
+      max-width: 560px;
+      width: 100%;
+      background: rgba(22, 22, 24, 0.85);
+      border: 1px solid rgba(255, 107, 53, 0.25);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(255, 107, 53, 0.16);
+      color: #ff9a6a;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+    h1 {
+      margin: 18px 0 12px;
+      font-size: 2rem;
+    }
+    p {
+      margin: 0 0 18px;
+      line-height: 1.6;
+      color: #d6d6d8;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .btn {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: #ff6b35;
+      color: #111;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #f5f5f5;
+    }
+    .status {
+      margin-top: 16px;
+      font-size: 0.85rem;
+      color: #9d9da1;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">Offline mode</span>
+    <h1>You are offline</h1>
+    <p>Baysoko needs a connection to load the latest listings and messages. Check your network and try again.</p>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+      <button class="btn btn-ghost" onclick="history.back()">Go back</button>
+    </div>
+    <div class="status">If this keeps happening, reconnect to Wi-Fi or mobile data.</div>
+  </div>
+</body>
+</html>

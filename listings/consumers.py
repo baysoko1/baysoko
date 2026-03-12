@@ -44,7 +44,7 @@ class CartConsumer(AsyncWebsocketConsumer):
                 }
             return {
                 'cart_total': float(cart.get_total_price()),
-                'cart_item_count': cart.items.count(),
+                'cart_item_count': sum(int(item.quantity or 0) for item in cart.items.all()),
                 'item_totals': item_totals,
             }
         except Exception:

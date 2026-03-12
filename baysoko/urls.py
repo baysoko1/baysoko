@@ -27,8 +27,11 @@ urlpatterns = [
     path('reviews/', include('reviews.urls')),
     path('blog/', include('blog.urls')),
     path('notifications/', include('notifications.urls')),
+    path('affiliates/', include('affiliates.urls')),
     path('storefront/', include('storefront.urls')),
     path('healthz/', views.health, name='health'),
+    path('service-worker.js', views.service_worker, name='service_worker'),
+    path('manifest.json', views.manifest, name='manifest'),
     
     # Delivery System
     path('delivery/', include('delivery.urls')),

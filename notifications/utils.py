@@ -39,6 +39,21 @@ def create_notification(recipient, notification_type, title, message,
             except Exception:
                 pass
 
+        # Best-effort push via OneSignal if configured
+        try:
+            NotificationService.send_push_notification(
+                recipient,
+                title,
+                message,
+                data={
+                    'notification_id': notification.id,
+                    'action_url': action_url,
+                    'notification_type': notification_type,
+                }
+            )
+        except Exception:
+            pass
+
         return notification
     return None
 
@@ -118,8 +133,29 @@ class NotificationService:
     @staticmethod
     def send_push_notification(user, title, message, data=None):
         """Send push notification (implement based on your push service)"""
-        # Implementation for Firebase Cloud Messaging or similar
-        pass
+        try:
+            app_id = getattr(settings, 'ONESIGNAL_APP_ID', '')
+            api_key = getattr(settings, 'ONESIGNAL_API_KEY', '')
+            rest_url = getattr(settings, 'ONESIGNAL_REST_URL', 'https://onesignal.com/api/v1/notifications')
+            if not app_id or not api_key:
+                return False
+            external_id = str(user.id)
+            payload = {
+                'app_id': app_id,
+                'include_external_user_ids': [external_id],
+                'headings': {'en': title},
+                'contents': {'en': message},
+                'data': data or {},
+            }
+            headers = {
+                'Authorization': f'Basic {api_key}',
+                'Content-Type': 'application/json',
+            }
+            resp = requests.post(rest_url, json=payload, headers=headers, timeout=8)
+            return resp.status_code in (200, 201)
+        except Exception as e:
+            logger.error(f"Push send failed: {str(e)}")
+            return False
 
 def notify_new_order(seller, buyer, order):
     """Notify seller about new order"""
