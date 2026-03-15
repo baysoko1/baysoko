@@ -20,6 +20,7 @@ from django.utils.timezone import make_aware
 from django.contrib import messages
 from django.contrib.auth.views import LoginView as AuthLoginView, LogoutView
 from django.contrib.auth import login as auth_login
+from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
 
@@ -799,6 +800,20 @@ def delivery_register(request):
     if request.method == 'POST':
         form = DeliveryUserCreationForm(request.POST)
         if form.is_valid():
+            email = (form.cleaned_data.get('email') or '').strip().lower()
+            existing_user = None
+            if email:
+                try:
+                    User = get_user_model()
+                    existing_user = User.objects.filter(email__iexact=email).order_by('date_joined', 'id').first()
+                except Exception:
+                    existing_user = None
+            if existing_user:
+                messages.info(request, 'An account with this email already exists. Please sign in to continue.')
+                login_url = reverse_lazy('delivery:login')
+                next_url = reverse_lazy('delivery:dashboard')
+                return redirect(f"{login_url}?next={next_url}")
+
             user = form.save()
             try:
                 auth_login(request, user)

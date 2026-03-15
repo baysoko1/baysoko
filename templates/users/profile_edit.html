@@ -209,6 +209,29 @@
     .location-suggestion-item:hover {
         background: rgba(var(--primary-rgb), 0.08);
     }
+    .location-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 0.4rem;
+        gap: 0.4rem;
+    }
+    .use-location-btn {
+        background: rgba(var(--primary-rgb), 0.08);
+        border: 1px solid rgba(var(--primary-rgb), 0.35);
+        color: var(--primary);
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        transition: var(--transition);
+    }
+    .use-location-btn:hover {
+        background: rgba(var(--primary-rgb), 0.16);
+        transform: translateY(-1px);
+    }
 
     .textarea-modern {
         min-height: 120px;
@@ -1024,6 +1047,12 @@
                             placeholder="Your area in Homabay"
                             required>
                     <div class="location-suggestions" id="profileLocationSuggestions"></div>
+                    <div class="location-actions">
+                        <button type="button" class="use-location-btn" id="useCurrentLocationBtn">
+                            <i class="bi bi-geo-alt"></i>
+                            Use current location
+                        </button>
+                    </div>
                     {% if form.location.errors %}
                         <div class="error-message-modern mt-2">{{ form.location.errors }}</div>
                     {% endif %}
@@ -1323,6 +1352,7 @@ document.addEventListener('DOMContentLoaded', function() {
     (function() {
         const input = document.getElementById('id_location');
         const suggestions = document.getElementById('profileLocationSuggestions');
+        const useCurrentBtn = document.getElementById('useCurrentLocationBtn');
         if (!input || !suggestions) return;
         let timer = null;
         const viewbox = '34.0,-0.1,35.2,-1.1';
@@ -1422,12 +1452,37 @@ document.addEventListener('DOMContentLoaded', function() {
 
         input.addEventListener('blur', () => setTimeout(hideSuggestions, 200));
 
+        if (useCurrentBtn && window.BaysokoGeo) {
+            useCurrentBtn.addEventListener('click', async () => {
+                try {
+                    useCurrentBtn.disabled = true;
+                    useCurrentBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Locating...';
+                    const loc = await window.BaysokoGeo.ensurePermission({ force: true });
+                    const label = await window.BaysokoGeo.reverseGeocode(loc.lat, loc.lng);
+                    if (label) {
+                        input.value = label;
+                        addRecentLocation(label);
+                        input.focus();
+                        renderSuggestions(localMatches(label));
+                    } else {
+                        renderSuggestions(localMatches(input.value || ''));
+                    }
+                } catch (e) {
+                    renderSuggestions(localMatches(input.value || ''));
+                } finally {
+                    useCurrentBtn.disabled = false;
+                    useCurrentBtn.innerHTML = '<i class="bi bi-geo-alt"></i> Use current location';
+                }
+            });
+        }
+
         if (window.BaysokoGeo && (!input.value || !input.value.trim())) {
             window.BaysokoGeo.requestCurrentLocation().then(async (loc) => {
                 const label = await window.BaysokoGeo.reverseGeocode(loc.lat, loc.lng);
                 if (label) {
                     input.value = label;
                     addRecentLocation(label);
+                    renderSuggestions(localMatches(label));
                 }
             }).catch(() => {});
         }

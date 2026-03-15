@@ -160,6 +160,14 @@ class CustomUserChangeForm(forms.ModelForm):
             'location': forms.TextInput(attrs={'class': 'input-modern', 'placeholder': 'Your area in Homabay'}),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Enforce required fields for profile completion
+        if 'phone_number' in self.fields:
+            self.fields['phone_number'].required = True
+        if 'location' in self.fields:
+            self.fields['location'].required = True
+
     def clean_username(self):
         username = self.cleaned_data.get('username')
         if User.objects.filter(username=username).exclude(pk=self.instance.pk).exists():
@@ -171,6 +179,26 @@ class CustomUserChangeForm(forms.ModelForm):
         if User.objects.filter(email=email).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError('This email is already registered.')
         return email
+
+    def clean_phone_number(self):
+        phone_number = self.cleaned_data.get('phone_number')
+        if phone_number:
+            phone_number = phone_number.strip()
+            leading_plus = phone_number.startswith('+')
+            digits = re.sub(r'[^0-9]', '', phone_number)
+            phone_number = f"+{digits}" if leading_plus else digits
+            if not re.match(r'^\+?[0-9]+$', phone_number):
+                raise forms.ValidationError("Please enter a valid phone number.")
+            if User.objects.filter(phone_number=phone_number).exclude(pk=self.instance.pk).exists():
+                raise forms.ValidationError("This phone number is already registered.")
+            return phone_number
+        raise forms.ValidationError("Phone number is required.")
+
+    def clean_location(self):
+        location = (self.cleaned_data.get('location') or '').strip()
+        if not location:
+            raise forms.ValidationError("Location is required.")
+        return location
 
 
 class CustomAuthenticationForm(AuthenticationForm):

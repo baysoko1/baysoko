@@ -83,6 +83,19 @@ def _sync_from_delivery_profile(user):
         logger.exception('Failed to sync delivery profile for user %s', getattr(user, 'id', None))
         return False
 
+def _normalize_next_url(next_url):
+    if not next_url:
+        return None
+    next_url = str(next_url).strip()
+    if not next_url.startswith('/'):
+        return None
+    if next_url.startswith('//'):
+        return None
+    return next_url
+
+def _is_delivery_next(next_url):
+    return bool(next_url and next_url.startswith('/delivery'))
+
 from baysoko.utils.email_helpers import _send_email_threaded, send_email_brevo, render_and_send
 from notifications.utils import notify_system_message
 from notifications.utils import create_and_broadcast_notification
@@ -681,6 +694,11 @@ def google_login(request):
         request.session['oauth_state'] = state
         request.session['oauth_action'] = 'register'
         params['state'] = state
+        next_url = _normalize_next_url(request.GET.get('next'))
+        if next_url:
+            request.session['post_login_redirect'] = next_url
+            if _is_delivery_next(next_url):
+                request.session['delivery_login_intent'] = True
 
         url = f"{auth_url}?{urlencode(params)}"
         logger.info(f"Google OAuth redirect URI: {redirect_uri}")
@@ -810,6 +828,12 @@ def google_callback(request):
                 raise User.DoesNotExist()
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             _sync_from_delivery_profile(user)
+            next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
+            is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
+            if is_delivery_flow:
+                request.session['delivery_auth'] = True
+                request.session.pop('delivery_login_intent', None)
+                return redirect(next_url or reverse('delivery:dashboard'))
             if not user.phone_number:
                 messages.info(request, 'Please verify your details and include phone number to continue.')
                 return redirect('profile-edit', pk=user.pk)
@@ -850,6 +874,13 @@ def google_callback(request):
                 logger.exception('Failed to queue welcome email for social signup')
 
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
+            is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
+            if is_delivery_flow:
+                request.session['delivery_auth'] = True
+                request.session.pop('delivery_login_intent', None)
+                messages.success(request, 'Account created. Welcome to Baysoko Delivery!')
+                return redirect(next_url or reverse('delivery:dashboard'))
             request.session['just_registered'] = True
             request.session['just_registered_message'] = 'Account created with Google! Check your email to verify your account.'
             if not user.location:
@@ -876,6 +907,11 @@ def facebook_login(request):
         auth_url = 'https://www.facebook.com/v13.0/dialog/oauth'
         url = f"{auth_url}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
         request.session['oauth_action'] = 'register'
+        next_url = _normalize_next_url(request.GET.get('next'))
+        if next_url:
+            request.session['post_login_redirect'] = next_url
+            if _is_delivery_next(next_url):
+                request.session['delivery_login_intent'] = True
         return redirect(url)
 
     except SocialApp.DoesNotExist:
@@ -932,6 +968,12 @@ def facebook_callback(request):
                 raise User.DoesNotExist()
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             _sync_from_delivery_profile(user)
+            next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
+            is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
+            if is_delivery_flow:
+                request.session['delivery_auth'] = True
+                request.session.pop('delivery_login_intent', None)
+                return redirect(next_url or reverse('delivery:dashboard'))
             if not user.phone_number:
                 messages.info(request, 'Please add your phone number to continue.')
                 return redirect('profile-edit', pk=user.pk)
@@ -972,6 +1014,13 @@ def facebook_callback(request):
                 logger.exception('Failed to queue welcome email for social signup')
 
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
+            is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
+            if is_delivery_flow:
+                request.session['delivery_auth'] = True
+                request.session.pop('delivery_login_intent', None)
+                messages.success(request, 'Account created. Welcome to Baysoko Delivery!')
+                return redirect(next_url or reverse('delivery:dashboard'))
             request.session['just_registered'] = True
             request.session['just_registered_message'] = 'Account created with Facebook! Check your email to verify your account.'
             if not user.location:
@@ -1163,6 +1212,14 @@ class ProfileUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
                     pass
         except Exception:
             logger.exception('Error handling phone verification after profile update')
+
+        # If required fields are still missing, keep user on profile edit so they see feedback.
+        if not self.object.phone_number or not self.object.location:
+            if not self.object.phone_number:
+                messages.info(self.request, 'Please add your phone number to complete your profile.')
+            if not self.object.location:
+                messages.info(self.request, 'Please add your location to complete your profile.')
+            return redirect('profile-edit', pk=self.object.pk)
 
         return response
 

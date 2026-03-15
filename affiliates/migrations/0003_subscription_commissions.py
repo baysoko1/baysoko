@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('affiliates', '0002_payouts'),
-        ('storefront', '0001_initial'),
+        ('storefront', '0004_add_mpesa_models'),
     ]
 
     operations = [
@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('paid_at', models.DateTimeField(blank=True, null=True)),
                 ('affiliate', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='subscription_commissions', to='affiliates.affiliateprofile')),
-                ('payment', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='affiliate_subscription_commission', to='storefront.mpesapayment')),
+                ('payment', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='affiliate_subscription_commission', to='storefront.MpesaPayment')),
                 ('referred_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='affiliate_subscription_referrals', to=settings.AUTH_USER_MODEL)),
                 ('subscription', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='affiliate_commissions', to='storefront.subscription')),
             ],

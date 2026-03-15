@@ -17,7 +17,7 @@ class User(AbstractUser):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
     phone_number = models.CharField(max_length=15, unique=True, null=True, blank=True)
-    location = models.CharField(max_length=100, help_text="Your specific area in Homabay, e.g., Ndhiwa, Rodi Kopany")
+    location = models.CharField(max_length=255, help_text="Your specific area in Homabay, e.g., Ndhiwa, Rodi Kopany")
     date_of_birth = models.DateField(verbose_name='Date of Birth', null=True, blank=True)
     bio = models.TextField(max_length=500, blank=True)
     
