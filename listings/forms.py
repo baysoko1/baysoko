@@ -5,7 +5,66 @@ from django.utils import timezone
 from .models import Listing, Category, Review, Payment
 from . import ai_listing_helper
 
+
+def _get_video_duration_seconds(uploaded_file):
+    try:
+        import json
+        import os
+        import tempfile
+        import subprocess
+        import shutil
+
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            return None
+
+        temp_path = None
+        if hasattr(uploaded_file, 'temporary_file_path'):
+            path = uploaded_file.temporary_file_path()
+        else:
+            suffix = os.path.splitext(getattr(uploaded_file, 'name', '') or '')[1]
+            fd, temp_path = tempfile.mkstemp(suffix=suffix)
+            with os.fdopen(fd, 'wb') as tmp:
+                for chunk in uploaded_file.chunks():
+                    tmp.write(chunk)
+            path = temp_path
+
+        result = subprocess.run(
+            [ffprobe, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'format=duration', '-of', 'json', path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout or '{}')
+        duration = data.get('format', {}).get('duration')
+        if duration is None:
+            return None
+        return float(duration)
+    except Exception:
+        return None
+    finally:
+        try:
+            if 'temp_path' in locals() and temp_path:
+                os.remove(temp_path)
+        except Exception:
+            pass
+
+class MultiFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
 class ListingForm(forms.ModelForm):
+    video_descriptions = forms.FileField(
+        required=False,
+        widget=MultiFileInput(attrs={
+            'accept': 'video/*',
+            'multiple': True
+        }),
+        help_text='Optional short video descriptions (up to 3, max 45s, 15MB each).'
+    )
+
     class Meta:
         model = Listing
         fields = ['title', 'description', 'price', 'category', 'store', 'location', 
@@ -232,6 +291,23 @@ class ListingForm(forms.ModelForm):
 
         cleaned_data['dynamic_fields'] = dynamic_data
         return cleaned_data
+
+    def clean_video_descriptions(self):
+        videos = self.files.getlist('video_descriptions')
+        if not videos:
+            return []
+        if len(videos) > 3:
+            raise forms.ValidationError("You can upload up to 3 video descriptions.")
+        for video in videos:
+            content_type = getattr(video, 'content_type', '') or ''
+            if not content_type.startswith('video/'):
+                raise forms.ValidationError("Only video files are allowed for video descriptions.")
+            if getattr(video, 'size', 0) > 15 * 1024 * 1024:
+                raise forms.ValidationError("Each video must be 15MB or smaller.")
+            duration = _get_video_duration_seconds(video)
+            if duration is not None and duration > 45:
+                raise forms.ValidationError("Each video must be 45 seconds or shorter.")
+        return videos
     
     def _get_featured_status(self, store):
         """Determine if listing should be featured based on store's active subscription"""

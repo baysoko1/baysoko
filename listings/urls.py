@@ -18,6 +18,7 @@ urlpatterns = [
     path('listing/<int:listing_id>/toggle_favorite/', views.toggle_favorite, name='toggle_favorite'),
     path('favorites/toggle/<int:listing_id>/', views.toggle_favorite, name='toggle_favorite'),
     path('favorites/', views.user_favorites, name='user_favorites'),
+    path('reels/<str:kind>/<int:video_id>/<str:action>/', views.reel_action, name='reel_action'),
     path('listing/new/', ListingCreateView.as_view(), name='listing-create'),
     path('listing/<int:pk>/update/', ListingUpdateView.as_view(), name='listing-update'),
     path('listing/<int:pk>/delete/', ListingDeleteView.as_view(), name='listing-delete'),

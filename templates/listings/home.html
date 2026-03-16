@@ -331,6 +331,154 @@
         box-shadow: var(--shadow-lg);
     }
 
+    /* Reels section */
+    .reels-section {
+        position: relative;
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border-color);
+        border-bottom: 1px solid var(--border-color);
+        padding: var(--spacing-xl) 0;
+    }
+    .reels-track {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-lg);
+        max-height: 70vh;
+        overflow-y: auto;
+        scroll-snap-type: y mandatory;
+        padding: 0 var(--spacing-md);
+        -webkit-overflow-scrolling: touch;
+    }
+    .reel-card {
+        width: min(420px, 100%);
+        background: var(--card-bg);
+        border-radius: 20px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-md);
+        scroll-snap-align: start;
+        position: relative;
+        margin: 0 auto;
+    }
+    .reel-video {
+        width: 100%;
+        height: 360px;
+        object-fit: cover;
+        background: #000;
+    }
+    .reel-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        padding: 16px;
+        background: linear-gradient(180deg, rgba(0,0,0,0.05) 30%, rgba(0,0,0,0.75) 100%);
+        color: white;
+    }
+    .reel-actions {
+        position: absolute;
+        right: 12px;
+        bottom: 80px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .reel-action-btn {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(0,0,0,0.55);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        transition: transform 0.2s ease, background 0.2s ease;
+    }
+    .reel-action-btn.active {
+        background: rgba(255, 107, 53, 0.95);
+        transform: scale(1.05);
+    }
+    .reel-action-count {
+        font-size: 0.75rem;
+        color: rgba(255,255,255,0.9);
+        text-align: center;
+    }
+    .reel-meta {
+        display: grid;
+        gap: 6px;
+    }
+    .reel-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    .reel-price {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #ffd166;
+    }
+    .reel-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: white;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .reel-link:hover {
+        color: #ffd166;
+    }
+    .reel-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.75);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        padding: 20px;
+    }
+    .reel-modal.show {
+        display: flex;
+    }
+    .reel-modal-content {
+        width: min(520px, 100%);
+        background: var(--card-bg);
+        border-radius: 18px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        position: relative;
+    }
+    .reel-modal video {
+        width: 100%;
+        height: 520px;
+        object-fit: cover;
+        background: #000;
+    }
+    .reel-modal-close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(0,0,0,0.6);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2;
+    }
+    .reel-modal-meta {
+        padding: 14px 16px 18px;
+        display: grid;
+        gap: 6px;
+    }
+
     .scroll-button {
         position: absolute;
         top: 50%;
@@ -3821,6 +3969,74 @@
 </section>
 {% endif %}
 
+{% if reel_items %}
+<section class="reels-section scroll-animate">
+    <div class="container-custom">
+        <div class="section-header">
+            <h2 class="section-title">Baysoko Reels</h2>
+            <p class="section-subtitle">Quick video tours from sellers</p>
+        </div>
+        <div class="reels-track" id="reelsTrack">
+            {% for reel in reel_items %}
+            <div class="reel-card" data-video-id="{{ reel.video_id }}" data-kind="{{ reel.kind }}">
+                <video class="reel-video" src="{{ reel.video_url }}" muted playsinline preload="metadata"></video>
+                <div class="reel-actions">
+                    <div class="text-center">
+                        <button class="reel-action-btn reel-like" data-action="like" title="Like">
+                            <i class="bi bi-heart-fill"></i>
+                        </button>
+                        <div class="reel-action-count" data-count="likes">{{ reel.likes_count|default:0 }}</div>
+                    </div>
+                    <div class="text-center">
+                        <button class="reel-action-btn reel-comment" data-action="comment" title="Comment">
+                            <i class="bi bi-chat-dots"></i>
+                        </button>
+                        <div class="reel-action-count" data-count="comments">{{ reel.comments_count|default:0 }}</div>
+                    </div>
+                    <div class="text-center">
+                        <button class="reel-action-btn reel-share" data-action="share" title="Share">
+                            <i class="bi bi-share"></i>
+                        </button>
+                        <div class="reel-action-count" data-count="shares">{{ reel.shares_count|default:0 }}</div>
+                    </div>
+                </div>
+                <div class="reel-overlay">
+                    <div class="reel-meta">
+                        <div class="reel-title">{{ reel.title|truncatechars:40 }}</div>
+                        {% if reel.price %}
+                        <div class="reel-price">KSh {{ reel.price|intcomma }}</div>
+                        {% else %}
+                        <div class="reel-price">Visit Store</div>
+                        {% endif %}
+                        <a class="reel-link" href="{{ reel.url }}">
+                            {% if reel.kind == 'store' %}View Store{% else %}View Listing{% endif %} <i class="bi bi-arrow-right"></i>
+                        </a>
+                        <div class="reel-action-count" data-count="views">
+                            <i class="bi bi-eye me-1"></i>{{ reel.views_count|default:0 }} views
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<div class="reel-modal" id="reelModal">
+    <div class="reel-modal-content">
+        <button class="reel-modal-close" id="reelModalClose"><i class="bi bi-x"></i></button>
+        <video id="reelModalVideo" controls playsinline></video>
+        <div class="reel-modal-meta">
+            <div class="reel-title" id="reelModalTitle"></div>
+            <div class="reel-price" id="reelModalPrice"></div>
+            <a class="reel-link" id="reelModalLink" href="#">
+                View Listing <i class="bi bi-arrow-right"></i>
+            </a>
+        </div>
+    </div>
+</div>
+
 <!-- ===== EXISTING RECENTLY VIEWED (enhanced with carousel) ===== -->
 {% if user.is_authenticated and recently_viewed %}
 <section class="horizontal-scroll-section scroll-animate">
@@ -5057,6 +5273,9 @@
         {% if new_arrivals %}
         setupHorizontalScroll('newArrivalsScroll', 'newArrivalsScrollLeft', 'newArrivalsScrollRight');
         {% endif %}
+
+        setupHorizontalScroll('recommendedScroll', 'recommendedScrollLeft', 'recommendedScrollRight');
+        setupHorizontalScroll('recentlyViewedScroll', 'recentlyViewedScrollLeft', 'recentlyViewedScrollRight');
         
         // Add floating animation to elements with .floating class
         const floatingElements = document.querySelectorAll('.floating');
@@ -5089,6 +5308,211 @@
         }, observerOptions);
 
         scrollAnimateElements.forEach(el => observer.observe(el));
+
+        // ===== REELS INTERACTIONS =====
+        const reelsTrack = document.getElementById('reelsTrack');
+        const getCookie = (name) => {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        };
+
+        if (reelsTrack) {
+            const csrfToken = getCookie('csrftoken');
+            let viewObserver;
+            const reelModal = document.getElementById('reelModal');
+            const reelModalClose = document.getElementById('reelModalClose');
+            const reelModalVideo = document.getElementById('reelModalVideo');
+            const reelModalTitle = document.getElementById('reelModalTitle');
+            const reelModalPrice = document.getElementById('reelModalPrice');
+            const reelModalLink = document.getElementById('reelModalLink');
+
+            function updateReelCounts(videoId, data) {
+                const card = reelsTrack.querySelector(`.reel-card[data-video-id="${videoId}"]`);
+                if (!card) return;
+                const likes = card.querySelector('[data-count="likes"]');
+                const comments = card.querySelector('[data-count="comments"]');
+                const shares = card.querySelector('[data-count="shares"]');
+                const views = card.querySelector('[data-count="views"]');
+                if (likes && data.likes_count !== undefined) likes.textContent = data.likes_count;
+                if (comments && data.comments_count !== undefined) comments.textContent = data.comments_count;
+                if (shares && data.shares_count !== undefined) shares.textContent = data.shares_count;
+                if (views && data.views_count !== undefined) {
+                    views.innerHTML = `<i class="bi bi-eye me-1"></i>${data.views_count} views`;
+                }
+            }
+
+            function sendReelAction(videoId, action, kind) {
+                const reelKind = kind || 'listing';
+                return fetch(`/listings/reels/${reelKind}/${videoId}/${action}/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                }).then(res => res.ok ? res.json() : null).then(data => {
+                    if (data && data.success) updateReelCounts(videoId, data);
+                }).catch(() => {});
+            }
+
+            function wireReelCard(card) {
+                card.addEventListener('click', (e) => {
+                    if (e.target.closest('.reel-action-btn')) return;
+                    const video = card.querySelector('.reel-video');
+                    const title = card.querySelector('.reel-title');
+                    const price = card.querySelector('.reel-price');
+                    const link = card.querySelector('.reel-link');
+                    if (reelModal && reelModalVideo && video) {
+                        reelModalVideo.src = video.currentSrc || video.src;
+                        reelModalVideo.play().catch(() => {});
+                        if (reelModalTitle && title) reelModalTitle.textContent = title.textContent || '';
+                        if (reelModalPrice && price) reelModalPrice.textContent = price.textContent || '';
+                        if (reelModalLink && link) reelModalLink.href = link.getAttribute('href') || '#';
+                        reelModal.classList.add('show');
+                    }
+                });
+
+                const buttons = card.querySelectorAll('.reel-action-btn');
+                buttons.forEach((btn) => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const videoId = card.getAttribute('data-video-id');
+                        const kind = card.getAttribute('data-kind') || 'listing';
+                        const action = btn.getAttribute('data-action');
+                        if (!videoId || !action) return;
+
+                        if (action === 'like') {
+                            btn.classList.toggle('active');
+                            sendReelAction(videoId, 'like', kind);
+                            return;
+                        }
+
+                        if (action === 'comment') {
+                            const link = card.querySelector('.reel-link');
+                            sendReelAction(videoId, 'comment', kind);
+                            if (link) {
+                                window.location.href = link.getAttribute('href') + '#reviews';
+                            }
+                            return;
+                        }
+
+                        if (action === 'share') {
+                            const link = card.querySelector('.reel-link');
+                            const url = link ? link.getAttribute('href') : window.location.href;
+                            sendReelAction(videoId, 'share', kind);
+                            if (navigator.share) {
+                                navigator.share({ title: 'Baysoko Listing', url: url }).catch(() => {});
+                            } else if (navigator.clipboard) {
+                                navigator.clipboard.writeText(window.location.origin + url);
+                                showToast('Link copied to clipboard', 'success');
+                            }
+                        }
+                    });
+                });
+
+                const videoEl = card.querySelector('.reel-video');
+                if (videoEl && viewObserver) {
+                    viewObserver.observe(videoEl);
+                }
+            }
+
+            function buildReelCard(payload) {
+                const card = document.createElement('div');
+                card.className = 'reel-card';
+                card.setAttribute('data-video-id', payload.video_id);
+                card.setAttribute('data-kind', payload.kind || 'listing');
+                card.innerHTML = `
+                    <video class="reel-video" src="${payload.video_url}" muted playsinline preload="metadata"></video>
+                    <div class="reel-actions">
+                        <div class="text-center">
+                            <button class="reel-action-btn reel-like" data-action="like" title="Like">
+                                <i class="bi bi-heart-fill"></i>
+                            </button>
+                            <div class="reel-action-count" data-count="likes">${payload.likes_count || 0}</div>
+                        </div>
+                        <div class="text-center">
+                            <button class="reel-action-btn reel-comment" data-action="comment" title="Comment">
+                                <i class="bi bi-chat-dots"></i>
+                            </button>
+                            <div class="reel-action-count" data-count="comments">${payload.comments_count || 0}</div>
+                        </div>
+                        <div class="text-center">
+                            <button class="reel-action-btn reel-share" data-action="share" title="Share">
+                                <i class="bi bi-share"></i>
+                            </button>
+                            <div class="reel-action-count" data-count="shares">${payload.shares_count || 0}</div>
+                        </div>
+                    </div>
+                    <div class="reel-overlay">
+                        <div class="reel-meta">
+                            <div class="reel-title">${payload.listing_title || payload.store_name || 'New reel'}</div>
+                            <div class="reel-price">${payload.listing_price ? `KSh ${payload.listing_price}` : 'Visit Store'}</div>
+                            <a class="reel-link" href="${payload.listing_url || payload.url || '#'}">
+                                ${payload.kind === 'store' ? 'View Store' : 'View Listing'} <i class="bi bi-arrow-right"></i>
+                            </a>
+                            <div class="reel-action-count" data-count="views">
+                                <i class="bi bi-eye me-1"></i>${payload.views_count || 0} views
+                            </div>
+                        </div>
+                    </div>
+                `;
+                return card;
+            }
+
+            // WebSocket updates
+            try {
+                const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                const reelsWs = new WebSocket(`${proto}://${window.location.host}/ws/reels/`);
+                reelsWs.onmessage = (evt) => {
+                    try {
+                        const msg = JSON.parse(evt.data);
+                        if (msg.type === 'reel_update') {
+                            updateReelCounts(msg.payload.video_id, msg.payload);
+                        }
+                        if (msg.type === 'reel_created' && msg.payload) {
+                            const card = buildReelCard(msg.payload);
+                            reelsTrack.prepend(card);
+                            wireReelCard(card);
+                        }
+                    } catch (e) {}
+                };
+            } catch (e) {}
+
+            // View tracking using IntersectionObserver
+            viewObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const card = entry.target.closest('.reel-card');
+                        if (!card || card.dataset.viewed === '1') return;
+                        card.dataset.viewed = '1';
+                        const videoId = card.getAttribute('data-video-id');
+                        const kind = card.getAttribute('data-kind') || 'listing';
+                        if (videoId) sendReelAction(videoId, 'view', kind);
+                        if (entry.target.paused) entry.target.play().catch(() => {});
+                    } else {
+                        if (!entry.target.paused) entry.target.pause();
+                    }
+                });
+            }, { threshold: 0.6 });
+
+            reelsTrack.querySelectorAll('.reel-card').forEach(card => wireReelCard(card));
+
+            if (reelModal && reelModalClose) {
+                reelModalClose.addEventListener('click', () => {
+                    reelModal.classList.remove('show');
+                    if (reelModalVideo) {
+                        reelModalVideo.pause();
+                        reelModalVideo.src = '';
+                    }
+                });
+                reelModal.addEventListener('click', (e) => {
+                    if (e.target === reelModal) {
+                        reelModalClose.click();
+                    }
+                });
+            }
+        }
     });
     
     function initializeFavoriteButtonAnimations() {
@@ -5223,10 +5647,6 @@
         const end = campaignTimer.dataset.end || '2025-08-31T23:59:59';
         initCountdown('campaign', end);
     }
-
-    // ===== NEW CAROUSEL FOR RECOMMENDED, RECENTLY VIEWED =====
-    setupHorizontalScroll('recommendedScroll', 'recommendedScrollLeft', 'recommendedScrollRight');
-    setupHorizontalScroll('recentlyViewedScroll', 'recentlyViewedScrollLeft', 'recentlyViewedScrollRight');
 
     // Legacy help chat removed; global assistant widget (in base.html) handles chat interactions.
 

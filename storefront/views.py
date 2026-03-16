@@ -19,7 +19,7 @@ import logging
 from decimal import Decimal
 from collections import defaultdict
 from .decorators import store_owner_required, analytics_access_required, store_limit_check
-from .models import Store, Subscription, MpesaPayment, StockMovement, StoreReview, WithdrawalRequest
+from .models import Store, Subscription, MpesaPayment, StockMovement, StoreReview, WithdrawalRequest, StoreVideo
 from .models import PayoutVerification
 from .mpesa import MpesaGateway
 from .forms import StoreForm, UpgradeForm, SubscriptionPlanForm, StoreReviewForm
@@ -28,6 +28,52 @@ from .monitoring import PaymentMonitor
 from listings.models import Listing, Category, Favorite, ListingImage, Order, OrderItem, Payment
 from listings.forms import ListingForm
 from reviews.models import Review
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+
+def _broadcast_store_reel_created(video):
+    try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+        store = getattr(video, 'store', None)
+        if not store:
+            return
+        payload = {
+            'kind': 'store',
+            'video_id': video.id,
+            'video_url': video.get_video_url(),
+            'likes_count': video.likes_count,
+            'comments_count': video.comments_count,
+            'shares_count': video.shares_count,
+            'views_count': video.views_count,
+            'store_name': store.name,
+            'listing_url': reverse('storefront:store_detail', args=[store.slug]),
+            'url': reverse('storefront:store_detail', args=[store.slug]),
+        }
+        async_to_sync(channel_layer.group_send)(
+            'reels',
+            {'type': 'reel_created', 'payload': payload}
+        )
+    except Exception:
+        pass
+
+def _enforce_cloudinary_video_duration(video_obj, max_seconds=45):
+    try:
+        from cloudinary import api
+        cloudinary_field = getattr(video_obj, 'video', None)
+        public_id = getattr(cloudinary_field, 'public_id', None)
+        if not public_id:
+            return True
+        resource = api.resource(public_id, resource_type='video')
+        duration = resource.get('duration')
+        if duration is not None and float(duration) > max_seconds:
+            video_obj.delete()
+            return False
+    except Exception:
+        return True
+    return True
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +271,34 @@ def store_create(request):
                     store.cover_image = request.FILES['cover_image']
                 store.save()
 
+                # Process store videos (max 3)
+                videos = request.FILES.getlist('store_videos')
+                if videos:
+                    existing_count = store.videos.count()
+                    if existing_count + len(videos) > 3:
+                        messages.error(request, "You can upload up to 3 store videos.")
+                        return render(request, 'storefront/store_form.html', {
+                            'form': form,
+                            'creating_store': True,
+                            'has_existing_store': existing_stores.exists(),
+                            'has_premium': has_premium,
+                            'plan_status': plan_status,
+                            'can_create_store': can_create,
+                            'can_be_featured': False,
+                            'is_enterprise': False,
+                        })
+                    start_order = existing_count
+                    for idx, video in enumerate(videos):
+                        created_video = StoreVideo.objects.create(
+                            store=store,
+                            video=video,
+                            order=start_order + idx
+                        )
+                        if not _enforce_cloudinary_video_duration(created_video):
+                            messages.error(request, "A store video longer than 45 seconds was removed.")
+                            continue
+                        _broadcast_store_reel_created(created_video)
+
                 # Automatically assign Free plan semantics (no DB Subscription required)
                 # Inform user via Django messages, create an in-app notification, and send email.
                 try:
@@ -348,6 +422,35 @@ def store_edit(request, slug):
         if form.is_valid():
             try:
                 store = form.save()
+
+                if 'delete_store_videos' in request.POST:
+                    delete_ids = request.POST.getlist('delete_store_videos')
+                    if delete_ids:
+                        StoreVideo.objects.filter(id__in=delete_ids, store=store).delete()
+
+                videos = request.FILES.getlist('store_videos')
+                if videos:
+                    existing_count = store.videos.count()
+                    if existing_count + len(videos) > 3:
+                        messages.error(request, "You can upload up to 3 store videos.")
+                        return render(request, 'storefront/store_form.html', {
+                            'form': form,
+                            'store': store,
+                            'creating_store': False,
+                            'can_be_featured': can_be_featured,
+                            'is_enterprise': is_enterprise,
+                        })
+                    start_order = existing_count
+                    for idx, video in enumerate(videos):
+                        created_video = StoreVideo.objects.create(
+                            store=store,
+                            video=video,
+                            order=start_order + idx
+                        )
+                        if not _enforce_cloudinary_video_duration(created_video):
+                            messages.error(request, "A store video longer than 45 seconds was removed.")
+                            continue
+                        _broadcast_store_reel_created(created_video)
                 
                 messages.success(request, "Store updated successfully!")
                 return redirect('storefront:store_detail', slug=store.slug)

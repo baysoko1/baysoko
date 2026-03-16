@@ -7,10 +7,10 @@ from django.db.models import Q, Count, Avg, F
 from django.db import utils as db_utils
 from django.db import IntegrityError, OperationalError
 from django.conf import settings
-from .models import Listing, Category, Favorite, Activity, RecentlyViewed, Review, Order, OrderItem, Cart, CartItem, Payment, Escrow, ListingImage
+from .models import Listing, Category, Favorite, Activity, RecentlyViewed, Review, Order, OrderItem, Cart, CartItem, Payment, Escrow, ListingImage, ListingVideo
 from chats.models import Message
 from .forms import ListingForm, AIListingForm
-from storefront.models import Store
+from storefront.models import Store, StoreVideo
 from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.shortcuts import render, redirect
@@ -33,6 +33,8 @@ from storefront.decorators import listing_limit_check
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from .models import NewsletterSubscription
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 
 from notifications.utils import (
@@ -40,6 +42,53 @@ from notifications.utils import (
     notify_payment_received, notify_listing_favorited, notify_new_review,
     notify_delivery_assigned, notify_delivery_confirmed, notify_delivery_status
 )
+
+
+def _broadcast_reel_created(video):
+    try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+        listing = getattr(video, 'listing', None)
+        if not listing:
+            return
+        payload = {
+            'kind': 'listing',
+            'video_id': video.id,
+            'video_url': video.get_video_url(),
+            'likes_count': video.likes_count,
+            'comments_count': video.comments_count,
+            'shares_count': video.shares_count,
+            'views_count': video.views_count,
+            'listing_id': listing.id,
+            'listing_title': listing.title,
+            'listing_price': float(listing.price) if listing.price is not None else 0,
+            'listing_url': reverse('listing-detail', args=[listing.pk]),
+            'url': reverse('listing-detail', args=[listing.pk]),
+        }
+        async_to_sync(channel_layer.group_send)(
+            'reels',
+            {'type': 'reel_created', 'payload': payload}
+        )
+    except Exception:
+        pass
+
+
+def _enforce_cloudinary_video_duration(video_obj, max_seconds=45):
+    try:
+        from cloudinary import api
+        cloudinary_field = getattr(video_obj, 'video', None)
+        public_id = getattr(cloudinary_field, 'public_id', None)
+        if not public_id:
+            return True
+        resource = api.resource(public_id, resource_type='video')
+        duration = resource.get('duration')
+        if duration is not None and float(duration) > max_seconds:
+            video_obj.delete()
+            return False
+    except Exception:
+        return True
+    return True
 
 
 User = get_user_model()
@@ -613,6 +662,82 @@ class ListingListView(ListView):
             context['recommended_listings'] = recommended
         except Exception:
             context['recommended_listings'] = context.get('trending_listings', [])
+
+        # Reels: latest listing + store videos
+        try:
+            listing_reels_qs = ListingVideo.objects.select_related('listing', 'listing__store').filter(
+                listing__is_active=True,
+                listing__is_sold=False
+            )
+            store_reels_qs = StoreVideo.objects.select_related('store').filter(
+                store__is_active=True
+            )
+            if self.request.user.is_authenticated:
+                interested_categories = set()
+                interested_stores = set()
+                try:
+                    recent_cats = RecentlyViewed.objects.filter(user=self.request.user).values_list('listing__category_id', flat=True)
+                    interested_categories.update([c for c in recent_cats if c])
+                except Exception:
+                    pass
+                try:
+                    favs = Favorite.objects.filter(user=self.request.user).select_related('listing', 'listing__store')
+                    for fav in favs:
+                        if fav.listing and fav.listing.category_id:
+                            interested_categories.add(fav.listing.category_id)
+                        if fav.listing and fav.listing.store_id:
+                            interested_stores.add(fav.listing.store_id)
+                except Exception:
+                    pass
+                reel_filter = Q()
+                if interested_categories:
+                    reel_filter |= Q(listing__category_id__in=list(interested_categories))
+                if interested_stores:
+                    reel_filter |= Q(listing__store_id__in=list(interested_stores))
+                if reel_filter:
+                    listing_reels_qs = listing_reels_qs.filter(reel_filter)
+                    store_reels_qs = store_reels_qs.filter(store__id__in=list(interested_stores))
+
+            reel_items = []
+            for vid in listing_reels_qs.order_by('-created_at')[:20]:
+                try:
+                    reel_items.append({
+                        'kind': 'listing',
+                        'created_at': vid.created_at,
+                        'video_id': vid.id,
+                        'video_url': vid.get_video_url(),
+                        'likes_count': vid.likes_count,
+                        'comments_count': vid.comments_count,
+                        'shares_count': vid.shares_count,
+                        'views_count': vid.views_count,
+                        'title': vid.listing.title if vid.listing else 'Listing',
+                        'price': vid.listing.price if vid.listing else None,
+                        'url': reverse('listing-detail', args=[vid.listing.pk]) if vid.listing else '#',
+                    })
+                except Exception:
+                    continue
+            for vid in store_reels_qs.order_by('-created_at')[:20]:
+                try:
+                    reel_items.append({
+                        'kind': 'store',
+                        'created_at': vid.created_at,
+                        'video_id': vid.id,
+                        'video_url': vid.get_video_url(),
+                        'likes_count': vid.likes_count,
+                        'comments_count': vid.comments_count,
+                        'shares_count': vid.shares_count,
+                        'views_count': vid.views_count,
+                        'title': vid.store.name if vid.store else 'Store',
+                        'price': None,
+                        'url': reverse('storefront:store_detail', args=[vid.store.slug]) if vid.store else '#',
+                    })
+                except Exception:
+                    continue
+
+            reel_items.sort(key=lambda x: x.get('created_at') or timezone.now(), reverse=True)
+            context['reel_items'] = reel_items[:20]
+        except Exception:
+            context['reel_items'] = []
         
         # Featured users
         context['featured_users'] = User.objects.annotate(
@@ -963,6 +1088,10 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
             context['stores'] = user_store
         else:
             context['stores'] = Store.objects.none()
+        try:
+            context['location_choices'] = list(Listing.HOMABAY_LOCATIONS)
+        except Exception:
+            context['location_choices'] = []
         return context
 
     def get_form_kwargs(self):
@@ -1078,6 +1207,26 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
                     image=image
                 )
 
+        # Handle listing video descriptions (max 3)
+        videos = self.request.FILES.getlist('video_descriptions')
+        if videos:
+            existing_count = form.instance.videos.count()
+            if existing_count + len(videos) > 3:
+                messages.error(self.request, "You can upload up to 3 video descriptions per listing.")
+                context = self.get_context_data(form=form)
+                return render(self.request, 'listings/listing_form.html', context)
+            start_order = existing_count
+            for idx, video in enumerate(videos):
+                created_video = ListingVideo.objects.create(
+                    listing=form.instance,
+                    video=video,
+                    order=start_order + idx
+                )
+                if not _enforce_cloudinary_video_duration(created_video):
+                    messages.error(self.request, "A video longer than 45 seconds was removed.")
+                    continue
+                _broadcast_reel_created(created_video)
+
         # Create activity log
         Activity.objects.create(
             user=self.request.user,
@@ -1175,6 +1324,7 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         context['categories'] = Category.objects.filter(is_active=True)
         # Add existing images for display
         context['existing_images'] = self.object.images.all()
+        context['existing_videos'] = self.object.videos.all()
         # Get user's stores
         if self.request.user.is_authenticated:
             context['stores'] = Store.objects.filter(owner=self.request.user)
@@ -1182,6 +1332,10 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             context['stores'] = Store.objects.none()
         # Pass existing store for template
         context['current_store'] = self.object.store
+        try:
+            context['location_choices'] = list(Listing.HOMABAY_LOCATIONS)
+        except Exception:
+            context['location_choices'] = []
         # Provide category schemas for dynamic form rendering (id -> schema), with group fallback
         try:
             cats = Category.objects.filter(is_active=True).only('id', 'fields_schema', 'schema_group')
@@ -1314,6 +1468,35 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
                     id__in=delete_ids, 
                     listing=form.instance
                 ).delete()
+
+        # Handle listing video deletions
+        if 'delete_videos' in self.request.POST:
+            delete_ids = self.request.POST.getlist('delete_videos')
+            if delete_ids:
+                ListingVideo.objects.filter(
+                    id__in=delete_ids,
+                    listing=form.instance
+                ).delete()
+
+        # Handle listing video uploads (max 3 total)
+        videos = self.request.FILES.getlist('video_descriptions')
+        if videos:
+            existing_count = form.instance.videos.count()
+            if existing_count + len(videos) > 3:
+                messages.error(self.request, "You can upload up to 3 video descriptions per listing.")
+                context = self.get_context_data(form=form)
+                return render(self.request, 'listings/listing_form.html', context)
+            start_order = existing_count
+            for idx, video in enumerate(videos):
+                created_video = ListingVideo.objects.create(
+                    listing=form.instance,
+                    video=video,
+                    order=start_order + idx
+                )
+                if not _enforce_cloudinary_video_duration(created_video):
+                    messages.error(self.request, "A video longer than 45 seconds was removed.")
+                    continue
+                _broadcast_reel_created(created_video)
         
         # Create activity log
         Activity.objects.create(
@@ -1933,6 +2116,50 @@ def toggle_favorite(request, listing_id):
         'user_favorite_count': user_favorite_count,
         'message': 'Added to favorites!' if is_favorited else 'Removed from favorites!'
     })
+
+
+@require_POST
+def reel_action(request, kind, video_id, action):
+    if kind == 'store':
+        video = get_object_or_404(StoreVideo, id=video_id)
+    else:
+        video = get_object_or_404(ListingVideo, id=video_id)
+    valid_actions = {
+        'like': 'likes_count',
+        'comment': 'comments_count',
+        'share': 'shares_count',
+        'view': 'views_count',
+    }
+    if action not in valid_actions:
+        return JsonResponse({'success': False, 'error': 'Invalid action.'}, status=400)
+
+    field = valid_actions[action]
+    try:
+        model_cls = StoreVideo if kind == 'store' else ListingVideo
+        model_cls.objects.filter(id=video.id).update(**{field: F(field) + 1})
+        video.refresh_from_db(fields=[field, 'likes_count', 'comments_count', 'shares_count', 'views_count'])
+    except Exception:
+        return JsonResponse({'success': False, 'error': 'Unable to update count.'}, status=500)
+
+    payload = {
+        'video_id': video.id,
+        'likes_count': video.likes_count,
+        'comments_count': video.comments_count,
+        'shares_count': video.shares_count,
+        'views_count': video.views_count,
+    }
+
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                'reels',
+                {'type': 'reel_update', 'payload': payload}
+            )
+    except Exception:
+        pass
+
+    return JsonResponse({'success': True, **payload})
 
 @login_required
 def user_favorites(request):

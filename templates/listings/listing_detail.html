@@ -213,6 +213,52 @@
         border-radius: 10px;
         display: inline-block;
     }
+
+    /* ===== VIDEO DESCRIPTIONS ===== */
+    .video-section {
+        padding: 12px 12px 6px;
+        background: var(--card-bg);
+        border-top: 1px solid var(--border-color);
+    }
+    .video-section-title {
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .video-strip {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        padding-bottom: 6px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .video-card {
+        flex: 0 0 180px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        position: relative;
+    }
+    .video-card video {
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+        background: #000;
+    }
+    .video-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: rgba(0,0,0,0.6);
+        color: #fff;
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 12px;
+    }
     
     /* ===== LISTING INFO SECTION ===== */
     .listing-info {
@@ -1824,6 +1870,23 @@
                     </div>
                     {% endif %}
                 </div>
+
+                {% if listing.videos.all %}
+                <div class="video-section">
+                    <div class="video-section-title">
+                        <i class="bi bi-camera-reels"></i>
+                        Video Descriptions
+                    </div>
+                    <div class="video-strip">
+                        {% for vid in listing.videos.all %}
+                        <div class="video-card">
+                            <video src="{{ vid.get_video_url }}" controls playsinline></video>
+                            <span class="video-badge">Video {{ forloop.counter }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
                 
                 <!-- Listing Info -->
                 <div class="listing-info">

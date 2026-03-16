@@ -223,6 +223,36 @@
         border-color: var(--primary);
     }
 
+    /* ===== STORE VIDEOS ===== */
+    .store-video-section {
+        background: var(--card-bg);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-color);
+        padding: 14px;
+        margin-bottom: 20px;
+        box-shadow: var(--shadow-sm);
+    }
+    .store-video-strip {
+        display: flex;
+        gap: 12px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .store-video-card {
+        flex: 0 0 200px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+    }
+    .store-video-card video {
+        width: 100%;
+        height: 170px;
+        object-fit: cover;
+        background: #000;
+    }
+
     /* ===== PRODUCTS GRID ===== */
     .products-section {
         margin-bottom: 30px;
@@ -1003,6 +1033,24 @@
             {% endif %}
         </div>
     </div>
+
+    {% if store.videos.all %}
+    <section class="store-video-section">
+        <div class="section-header">
+            <div>
+                <h2 class="section-title">Store Reels</h2>
+                <p class="section-subtitle">A quick look at what we offer</p>
+            </div>
+        </div>
+        <div class="store-video-strip">
+            {% for vid in store.videos.all %}
+            <div class="store-video-card">
+                <video src="{{ vid.get_video_url }}" controls playsinline></video>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
 
     <!-- Products Section -->
     <section id="products" class="products-section">

@@ -373,6 +373,36 @@ class Store(models.Model):
     
 
 
+class StoreVideo(models.Model):
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='videos')
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    likes_count = models.PositiveIntegerField(default=0)
+    comments_count = models.PositiveIntegerField(default=0)
+    shares_count = models.PositiveIntegerField(default=0)
+    views_count = models.PositiveIntegerField(default=0)
+
+    if 'cloudinary' in __import__('django.conf').conf.settings.INSTALLED_APPS and hasattr(__import__('django.conf').conf.settings, 'CLOUDINARY_CLOUD_NAME') and __import__('django.conf').conf.settings.CLOUDINARY_CLOUD_NAME:
+        from cloudinary.models import CloudinaryField
+        video = CloudinaryField('video', folder='baysoko/stores/videos/', resource_type='video', null=True, blank=True)
+    else:
+        video = models.FileField(upload_to='store_videos/', null=True, blank=True)
+
+    class Meta:
+        ordering = ['order', 'created_at']
+
+    def __str__(self):
+        return f"Video for {self.store.name}"
+
+    def get_video_url(self):
+        try:
+            if self.video and hasattr(self.video, 'url'):
+                return self.video.url
+        except Exception:
+            pass
+        return ''
+
+
 class StoreReview(models.Model):
     """Review model for stores"""
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='reviews')

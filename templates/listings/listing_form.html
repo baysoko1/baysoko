@@ -757,6 +757,40 @@
                 </div>
             </div>
             {% endif %}
+
+            <!-- Video descriptions -->
+            <div class="mt-3">
+                <h5 class="form-label"><i class="bi bi-camera-reels me-1"></i>Video Descriptions (up to 3)</h5>
+                <div class="upload-card" id="listing-videos-upload-area">
+                    <div class="upload-icon"><i class="bi bi-camera-video"></i></div>
+                    <div class="upload-title">Add short video descriptions</div>
+                    <div class="upload-subtitle">Max 45 seconds · 15MB each</div>
+                    <input type="file" name="video_descriptions" id="id_video_descriptions" accept="video/*" multiple class="d-none">
+                    <button type="button" class="upload-btn" onclick="document.getElementById('id_video_descriptions').click()">
+                        <i class="bi bi-folder2-open"></i> Choose
+                    </button>
+                </div>
+                <div class="text-danger small mt-2" id="video-errors" style="display:none;"></div>
+                {% if form.video_descriptions.errors %}
+                    <div class="error-feedback"><i class="bi bi-exclamation-circle me-1"></i>{{ form.video_descriptions.errors.0 }}</div>
+                {% endif %}
+                <div class="preview-grid" id="listing-videos-preview"></div>
+            </div>
+
+            {% if form.instance.pk and existing_videos %}
+            <div class="mt-2">
+                <h6 class="fw-bold small">Current Videos</h6>
+                <div class="preview-grid">
+                    {% for vid in existing_videos %}
+                    <div class="preview-item">
+                        <video src="{{ vid.get_video_url }}" class="preview-img" style="object-fit:cover;" muted playsinline></video>
+                        <input type="checkbox" class="image-remove-checkbox" name="delete_videos" value="{{ vid.id }}" id="delete_video_{{ vid.id }}" style="position:absolute; top:2px; right:2px; z-index:2;">
+                        <label for="delete_video_{{ vid.id }}" class="preview-badge" style="background: var(--danger);">Delete</label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Navigation -->
@@ -1065,6 +1099,66 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Video preview + validation (45s max, 15MB)
+    const videoInput = document.getElementById('id_video_descriptions');
+    const videoPreview = document.getElementById('listing-videos-preview');
+    const videoErrors = document.getElementById('video-errors');
+    if (videoInput) {
+        videoInput.addEventListener('change', function() {
+            const files = Array.from(this.files || []);
+            let invalid = false;
+            if (videoErrors) {
+                videoErrors.style.display = 'none';
+                videoErrors.textContent = '';
+            }
+            if (videoPreview) videoPreview.innerHTML = '';
+            if (files.length > 3) {
+                invalid = true;
+                if (videoErrors) {
+                    videoErrors.textContent = 'You can upload up to 3 video descriptions.';
+                    videoErrors.style.display = 'block';
+                }
+            }
+            files.forEach((file) => {
+                if (!file.type.startsWith('video/')) {
+                    invalid = true;
+                    return;
+                }
+                if (file.size > 15 * 1024 * 1024) {
+                    invalid = true;
+                    if (videoErrors) {
+                        videoErrors.textContent = 'Each video must be 15MB or smaller.';
+                        videoErrors.style.display = 'block';
+                    }
+                    return;
+                }
+                const url = URL.createObjectURL(file);
+                const vid = document.createElement('video');
+                vid.src = url;
+                vid.muted = true;
+                vid.playsInline = true;
+                vid.addEventListener('loadedmetadata', () => {
+                    if (vid.duration > 45) {
+                        invalid = true;
+                        if (videoErrors) {
+                            videoErrors.textContent = 'Videos must be 45 seconds or shorter.';
+                            videoErrors.style.display = 'block';
+                        }
+                    }
+                });
+                const wrap = document.createElement('div');
+                wrap.className = 'preview-item';
+                wrap.appendChild(vid);
+                const badge = document.createElement('span');
+                badge.className = 'preview-badge';
+                badge.textContent = 'New';
+                wrap.appendChild(badge);
+                if (videoPreview) videoPreview.appendChild(wrap);
+            });
+            if (submitBtn) submitBtn.disabled = invalid;
+        });
+    }
+
     showStep(1);
 });
 </script>
@@ -1199,7 +1293,7 @@ document.addEventListener('DOMContentLoaded', function() {
     titleEl.addEventListener('blur', function(){ const title = (titleEl.value||'').trim(); if(title.length>3) sendGenerate(title); });
 })();
 </script>
-{{ form.location.field.choices|json_script:"listingLocationChoices" }}
+ {{ location_choices|json_script:"listingLocationChoices" }} 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const locationInput = document.getElementById('{{ form.location.id_for_label }}');

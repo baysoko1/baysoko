@@ -214,6 +214,25 @@
         padding: 1px 4px;
         border-radius: 8px;
     }
+    .preview-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .preview-item {
+        position: relative;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+    }
+    .preview-item video {
+        width: 100%;
+        height: 130px;
+        object-fit: cover;
+        background: #000;
+    }
 
     .delivery-map {
         border-radius: 0.5rem;
@@ -499,6 +518,41 @@
                 </div>
             </div>
 
+            <!-- Store Videos -->
+            <div class="form-section-card">
+                <h3 class="section-title"><i class="bi bi-camera-reels"></i> Store Videos</h3>
+                <div class="form-group">
+                    <div class="upload-card" id="storeVideosUploadArea">
+                        <div class="upload-icon"><i class="bi bi-camera-video"></i></div>
+                        <div class="upload-title">Add short store videos</div>
+                        <div class="upload-subtitle">Max 45 seconds · 15MB each · up to 3</div>
+                        <input type="file" name="store_videos" id="id_store_videos" accept="video/*" multiple class="d-none">
+                        <button type="button" class="upload-btn" onclick="document.getElementById('id_store_videos').click()">
+                            <i class="bi bi-folder2-open"></i> Choose
+                        </button>
+                    </div>
+                    <div class="text-danger small mt-2" id="store-video-errors" style="display:none;"></div>
+                    {% if form.store_videos.errors %}
+                        <div class="text-danger small mt-1">{{ form.store_videos.errors.0 }}</div>
+                    {% endif %}
+                    <div class="preview-grid" id="store-videos-preview"></div>
+                    {% if store and store.videos.all %}
+                    <div class="mt-2">
+                        <h6 class="fw-bold small">Current Videos</h6>
+                        <div class="preview-grid">
+                            {% for vid in store.videos.all %}
+                            <div class="preview-item">
+                                <video src="{{ vid.get_video_url }}" class="preview-img" style="object-fit:cover;" muted playsinline></video>
+                                <input type="checkbox" class="image-remove-checkbox" name="delete_store_videos" value="{{ vid.id }}" id="delete_store_video_{{ vid.id }}" style="position:absolute; top:2px; right:2px; z-index:2;">
+                                <label for="delete_store_video_{{ vid.id }}" class="preview-badge" style="background: var(--danger);">Delete</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
             <!-- Featured Store (if editing) -->
             {% if not creating_store %}
             <div class="form-section-card {% if can_be_featured %}featured-section{% else %}premium-required{% endif %}">
@@ -625,6 +679,68 @@ document.addEventListener('DOMContentLoaded', function() {
                     coverPreview.appendChild(div);
                 };
                 reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    // Store video preview + validation
+    const storeVideoInput = document.getElementById('id_store_videos');
+    const storeVideoPreview = document.getElementById('store-videos-preview');
+    const storeVideoErrors = document.getElementById('store-video-errors');
+    if (storeVideoInput) {
+        storeVideoInput.addEventListener('change', function() {
+            const files = Array.from(this.files || []);
+            let invalid = false;
+            if (storeVideoErrors) {
+                storeVideoErrors.style.display = 'none';
+                storeVideoErrors.textContent = '';
+            }
+            if (storeVideoPreview) storeVideoPreview.innerHTML = '';
+            if (files.length > 3) {
+                invalid = true;
+                if (storeVideoErrors) {
+                    storeVideoErrors.textContent = 'You can upload up to 3 store videos.';
+                    storeVideoErrors.style.display = 'block';
+                }
+            }
+            files.forEach((file) => {
+                if (!file.type.startsWith('video/')) {
+                    invalid = true;
+                    return;
+                }
+                if (file.size > 15 * 1024 * 1024) {
+                    invalid = true;
+                    if (storeVideoErrors) {
+                        storeVideoErrors.textContent = 'Each store video must be 15MB or smaller.';
+                        storeVideoErrors.style.display = 'block';
+                    }
+                    return;
+                }
+                const url = URL.createObjectURL(file);
+                const vid = document.createElement('video');
+                vid.src = url;
+                vid.muted = true;
+                vid.playsInline = true;
+                vid.addEventListener('loadedmetadata', () => {
+                    if (vid.duration > 45) {
+                        invalid = true;
+                        if (storeVideoErrors) {
+                            storeVideoErrors.textContent = 'Videos must be 45 seconds or shorter.';
+                            storeVideoErrors.style.display = 'block';
+                        }
+                    }
+                });
+                const wrap = document.createElement('div');
+                wrap.className = 'preview-item';
+                wrap.appendChild(vid);
+                const badge = document.createElement('span');
+                badge.className = 'preview-badge';
+                badge.textContent = 'New';
+                wrap.appendChild(badge);
+                if (storeVideoPreview) storeVideoPreview.appendChild(wrap);
+            });
+            if (invalid) {
+                storeVideoInput.value = '';
             }
         });
     }

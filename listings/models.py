@@ -82,6 +82,42 @@ class ListingImage(models.Model):
                 if hasattr(self.image, 'url'):
                     return self.image.url
         return '/static/images/listing_placeholder.svg'
+
+
+class ListingVideo(models.Model):
+    listing = models.ForeignKey('Listing', on_delete=models.CASCADE, related_name='videos')
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    likes_count = models.PositiveIntegerField(default=0)
+    comments_count = models.PositiveIntegerField(default=0)
+    shares_count = models.PositiveIntegerField(default=0)
+    views_count = models.PositiveIntegerField(default=0)
+
+    if 'cloudinary' in settings.INSTALLED_APPS and hasattr(settings, 'CLOUDINARY_CLOUD_NAME') and settings.CLOUDINARY_CLOUD_NAME:
+        video = CloudinaryField(
+            'video',
+            folder='baysoko/listing_videos/',
+            resource_type='video',
+            null=True,
+            blank=True
+        )
+    else:
+        video = models.FileField(upload_to='listing_videos/', null=True, blank=True)
+
+    class Meta:
+        ordering = ['order', 'created_at']
+
+    def __str__(self):
+        return f"Video for {self.listing.title}"
+
+    def get_video_url(self):
+        if self.video:
+            try:
+                return self.video.url
+            except Exception:
+                if hasattr(self.video, 'url'):
+                    return self.video.url
+        return ''
     
     
 class Listing(models.Model):
