@@ -168,6 +168,15 @@ class CustomUserChangeForm(forms.ModelForm):
         if 'location' in self.fields:
             self.fields['location'].required = True
 
+        # Lock verified contact fields only after the change limit is reached
+        try:
+            if getattr(self.instance, 'email_verified', False) and getattr(self.instance, 'email_change_count', 0) >= 2:
+                self.fields['email'].disabled = True
+            if getattr(self.instance, 'phone_verified', False) and getattr(self.instance, 'phone_change_count', 0) >= 2:
+                self.fields['phone_number'].disabled = True
+        except Exception:
+            pass
+
     def clean_username(self):
         username = self.cleaned_data.get('username')
         if User.objects.filter(username=username).exclude(pk=self.instance.pk).exists():
@@ -176,12 +185,26 @@ class CustomUserChangeForm(forms.ModelForm):
     
     def clean_email(self):
         email = self.cleaned_data.get('email')
+        # Prevent changing verified email
+        try:
+            if getattr(self.instance, 'email_verified', False) and email and email != self.instance.email:
+                if getattr(self.instance, 'email_change_count', 0) >= 2:
+                    raise forms.ValidationError('Email can only be changed twice after verification.')
+        except Exception:
+            pass
         if User.objects.filter(email=email).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError('This email is already registered.')
         return email
 
     def clean_phone_number(self):
         phone_number = self.cleaned_data.get('phone_number')
+        # Prevent changing verified phone number
+        try:
+            if getattr(self.instance, 'phone_verified', False) and phone_number and phone_number != self.instance.phone_number:
+                if getattr(self.instance, 'phone_change_count', 0) >= 2:
+                    raise forms.ValidationError('Phone number can only be changed twice after verification.')
+        except Exception:
+            pass
         if phone_number:
             phone_number = phone_number.strip()
             leading_plus = phone_number.startswith('+')

@@ -242,6 +242,19 @@ class DeliveryRequest(models.Model):
     
     def __str__(self):
         return f"Delivery #{self.tracking_number} - {self.status}"
+
+    def save(self, *args, **kwargs):
+        # Normalize any naive datetimes to avoid runtime warnings when USE_TZ=True.
+        try:
+            tz = timezone.get_current_timezone()
+            for field_name in ('created_at', 'pickup_time', 'estimated_delivery_time', 'actual_delivery_time'):
+                value = getattr(self, field_name, None)
+                if value and timezone.is_naive(value):
+                    setattr(self, field_name, timezone.make_aware(value, tz))
+        except Exception:
+            # Best-effort only; do not block saves.
+            pass
+        return super().save(*args, **kwargs)
     
     def calculate_distance(self):
         """Calculate distance between pickup and delivery points"""

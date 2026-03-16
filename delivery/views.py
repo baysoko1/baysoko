@@ -867,7 +867,7 @@ def delivery_profile_complete(request):
 
     profile = getattr(user, 'delivery_profile', None)
     if request.method == 'POST':
-        form = DeliveryProfileForm(request.POST, instance=profile)
+        form = DeliveryProfileForm(request.POST, instance=profile, user=user)
         if form.is_valid():
             delivery_profile = form.save(commit=False)
             delivery_profile.user = user
@@ -898,7 +898,7 @@ def delivery_profile_complete(request):
                     initial['city'] = user.location
         except Exception:
             pass
-        form = DeliveryProfileForm(instance=profile, initial=initial)
+        form = DeliveryProfileForm(instance=profile, initial=initial, user=user)
 
     # Pre-fill missing fields from social account data when available
     try:

@@ -184,6 +184,23 @@
         box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.15);
         transform: translateY(-2px);
     }
+    .verification-banner {
+        margin: var(--spacing-lg) var(--spacing-xl) 0;
+        padding: 0.9rem 1.1rem;
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(255, 193, 7, 0.35);
+        background: rgba(255, 193, 7, 0.12);
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+    .verification-banner i {
+        color: var(--warning);
+        font-size: 1.2rem;
+        margin-top: 2px;
+    }
 
     .location-suggestions {
         position: absolute;
@@ -867,6 +884,24 @@
     [data-theme="dark"] {
         --bg-primary-rgb: 18,18,18;
     }
+
+    .verification-banner .banner-link {
+        color: #ff6b35;
+        font-weight: 600;
+        text-decoration: underline;
+    }
+    .verification-banner .banner-link:hover {
+        color: #e65a2a;
+    }
+    .change-counter {
+        font-size: 0.8rem;
+        color: rgba(0, 0, 0, 0.55);
+        margin-top: 6px;
+        display: block;
+    }
+    [data-theme="dark"] .change-counter {
+        color: rgba(255, 255, 255, 0.65);
+    }
 </style>
 {% endblock %}
 
@@ -885,6 +920,20 @@
 
     <!-- Modern Profile Card -->
     <div class="profile-edit-card-modern">
+        <div class="verification-banner">
+            <i class="bi bi-shield-check"></i>
+            <div>
+                <strong>Verified contact details are protected.</strong>
+                <div class="text-muted mt-1">
+                    You can change your verified email or phone number up to <strong>2 times</strong>.
+                    Any change will require re‑verification before it’s active. Payouts can only go to your verified
+                    registration phone number.
+                    <a href="#" class="banner-link" id="contactVerificationLink">
+                        Learn why
+                    </a>
+                </div>
+            </div>
+        </div>
         <!-- Main Form -->
         <form method="post" enctype="multipart/form-data" class="form-section-modern" id="profileForm">
             {% csrf_token %}
@@ -1000,6 +1049,14 @@
                            id="{{ form.email.id_for_label }}" 
                            placeholder="your.email@example.com"
                            required>
+                    <span class="change-counter">
+                        Changes left:
+                        {% if user.email_change_count|default:0 >= 2 %}
+                            0
+                        {% else %}
+                            {{ 2|add:user.email_change_count }}
+                        {% endif %}
+                    </span>
                     {% if form.email.errors %}
                         <div class="error-message-modern mt-2">{{ form.email.errors }}</div>
                     {% endif %}
@@ -1031,6 +1088,14 @@
                            class="input-modern {% if form.phone_number.errors %}border-danger{% endif %}" 
                            id="{{ form.phone_number.id_for_label }}" 
                            placeholder="+254 712 345 678">
+                    <span class="change-counter">
+                        Changes left:
+                        {% if user.phone_change_count|default:0 >= 2 %}
+                            0
+                        {% else %}
+                            {{ 2|add:user.phone_change_count }}
+                        {% endif %}
+                    </span>
                     {% if form.phone_number.errors %}
                         <div class="error-message-modern mt-2">{{ form.phone_number.errors }}</div>
                     {% endif %}
@@ -1121,6 +1186,34 @@
 
 <!-- Global message container -->
 <div id="globalMessageContainer"></div>
+
+<!-- Contact Verification Modal -->
+<div class="modal-overlay" id="contactVerificationModal">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3><i class="bi bi-shield-check me-2"></i>Why we verify contact details</h3>
+            <button type="button" class="modal-close" id="closeContactVerificationModal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-icon">
+                <i class="bi bi-patch-check"></i>
+            </div>
+            <p class="text-secondary mb-3">
+                We re‑verify any email or phone number change to keep your account secure and to protect payouts.
+            </p>
+            <ul class="text-secondary ps-3">
+                <li>You can update a verified email or phone number up to two times.</li>
+                <li>After each change, the new contact must be verified before it becomes active.</li>
+                <li>Payouts are limited to your verified registration phone number.</li>
+            </ul>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-custom btn-primary" id="confirmContactVerificationModal">
+                Got it
+            </button>
+        </div>
+    </div>
+</div>
 
 <!-- Change Password Modal -->
 <div class="modal-overlay" id="changePasswordModal">
@@ -1491,12 +1584,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // ========== MODAL FUNCTIONALITY ==========
     const changeModal = document.getElementById('changePasswordModal');
     const deleteModal = document.getElementById('deleteAccountModal');
+    const contactModal = document.getElementById('contactVerificationModal');
     const changeBtn = document.getElementById('changePasswordBtn');
     const deleteBtn = document.getElementById('deleteAccountBtn');
+    const contactLink = document.getElementById('contactVerificationLink');
     const closeChange = document.getElementById('closeChangeModal');
     const cancelChange = document.getElementById('cancelChangeModal');
     const closeDelete = document.getElementById('closeDeleteModal');
     const cancelDelete = document.getElementById('cancelDeleteModal');
+    const closeContact = document.getElementById('closeContactVerificationModal');
+    const confirmContact = document.getElementById('confirmContactVerificationModal');
 
     function openModal(modal) {
         modal.classList.add('show');
@@ -1509,13 +1606,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
     changeBtn.addEventListener('click', () => openModal(changeModal));
     deleteBtn.addEventListener('click', () => openModal(deleteModal));
+    if (contactLink && contactModal) {
+        contactLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            openModal(contactModal);
+        });
+    }
 
     [closeChange, cancelChange].forEach(el => el.addEventListener('click', () => closeModal(changeModal)));
     [closeDelete, cancelDelete].forEach(el => el.addEventListener('click', () => closeModal(deleteModal)));
+    [closeContact, confirmContact].forEach(el => {
+        if (el && contactModal) {
+            el.addEventListener('click', () => closeModal(contactModal));
+        }
+    });
 
     // Close on overlay click (optional)
     changeModal.addEventListener('click', (e) => { if (e.target === changeModal) closeModal(changeModal); });
     deleteModal.addEventListener('click', (e) => { if (e.target === deleteModal) closeModal(deleteModal); });
+    if (contactModal) {
+        contactModal.addEventListener('click', (e) => { if (e.target === contactModal) closeModal(contactModal); });
+    }
 
     // ========== PASSWORD TOGGLE (for modals) ==========
     document.querySelectorAll('.password-toggle-btn').forEach(btn => {

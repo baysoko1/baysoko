@@ -54,6 +54,27 @@
             padding: 1.5rem;
         }
     }
+    .delivery-verification-banner {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+        background: rgba(0, 189, 126, 0.08);
+        border: 1px solid rgba(0, 189, 126, 0.22);
+        border-radius: 14px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .delivery-verification-banner i {
+        font-size: 1.25rem;
+        color: #00bd7e;
+    }
+    .delivery-verification-banner strong {
+        display: block;
+        font-weight: 700;
+    }
+    .delivery-verification-banner .text-muted {
+        font-size: 0.9rem;
+    }
 </style>
 {% endblock %}
 
@@ -63,6 +84,16 @@
         <div>
             <h2 class="page-title">Complete Your Delivery Profile</h2>
             <p class="page-subtitle">Add your delivery contact details so we can route orders and notifications properly.</p>
+        </div>
+    </div>
+    <div class="delivery-verification-banner">
+        <i class="bi bi-shield-check"></i>
+        <div>
+            <strong>Verified contact details are protected.</strong>
+            <div class="text-muted">
+                You can change a verified email or phone number up to 2 times. Any change requires re‑verification,
+                and payouts are limited to your verified registration phone number.
+            </div>
         </div>
     </div>
     <form method="post" novalidate>

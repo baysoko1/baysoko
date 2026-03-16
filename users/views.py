@@ -1164,8 +1164,10 @@ class ProfileUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         try:
             prev_obj = self.get_object()
             prev_phone = getattr(prev_obj, 'phone_number', None)
+            prev_email = getattr(prev_obj, 'email', None)
         except Exception:
             prev_phone = None
+            prev_email = None
 
         if 'profile_picture' in self.request.FILES:
             form.instance.profile_picture = self.request.FILES['profile_picture']
@@ -1174,6 +1176,23 @@ class ProfileUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
         # Save the form and update the instance
         response = super().form_valid(form)
+
+        # If email changed, require re-verification (up to change limit enforced at model/form)
+        try:
+            new_email = getattr(self.object, 'email', None)
+            email_verified = getattr(self.object, 'email_verified', False)
+            if new_email and prev_email and new_email != prev_email and not email_verified:
+                import random
+                import string
+                code = ''.join(random.choices(string.digits, k=7))
+                self.object.email_verification_code = code
+                self.object.email_verification_sent_at = timezone.now()
+                self.object.save(update_fields=['email_verification_code', 'email_verification_sent_at'])
+                send_verification_email(self.object)
+                messages.info(self.request, 'Please verify your new email address to continue.')
+                return redirect(reverse('verify_email') + f'?user_id={self.object.id}')
+        except Exception:
+            logger.exception('Failed to send email verification after email change')
 
         # Sync to delivery profile when user originated from delivery app
         try:

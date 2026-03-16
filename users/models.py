@@ -41,10 +41,12 @@ class User(AbstractUser):
     email_verified = models.BooleanField(default=False)
     email_verification_code = models.CharField(max_length=7, blank=True, null=True)
     email_verification_sent_at = models.DateTimeField(blank=True, null=True)
+    email_change_count = models.PositiveSmallIntegerField(default=0)
     # Phone verification fields
     phone_verified = models.BooleanField(default=False)
     phone_verification_code = models.CharField(max_length=7, blank=True, null=True)
     phone_verification_sent_at = models.DateTimeField(blank=True, null=True)
+    phone_change_count = models.PositiveSmallIntegerField(default=0)
     verification_attempts_today = models.IntegerField(default=0)
     last_verification_attempt_date = models.DateField(blank=True, null=True)
 
@@ -138,6 +140,28 @@ class User(AbstractUser):
                         self.phone_number = pn
         except Exception:
             # non-fatal: ensure save proceeds
+            pass
+        # Allow up to two changes for verified email/phone (force re-verification)
+        try:
+            if self.pk:
+                orig = User.objects.filter(pk=self.pk).only(
+                    'email', 'phone_number', 'email_verified', 'phone_verified',
+                    'email_change_count', 'phone_change_count'
+                ).first()
+                if orig:
+                    if self.email != orig.email and orig.email_verified:
+                        if orig.email_change_count >= 2:
+                            self.email = orig.email
+                        else:
+                            self.email_verified = False
+                            self.email_change_count = (orig.email_change_count or 0) + 1
+                    if self.phone_number != orig.phone_number and orig.phone_verified:
+                        if orig.phone_change_count >= 2:
+                            self.phone_number = orig.phone_number
+                        else:
+                            self.phone_verified = False
+                            self.phone_change_count = (orig.phone_change_count or 0) + 1
+        except Exception:
             pass
         if not CLOUDINARY_AVAILABLE and self.profile_picture:
             os.makedirs(os.path.join(settings.MEDIA_ROOT, 'profile_pics'), exist_ok=True)

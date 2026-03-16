@@ -861,14 +861,20 @@ def start_payout_verification(request, slug):
     if store.owner != request.user:
         return HttpResponseForbidden('Not authorized')
 
-    phone = request.POST.get('phone')
-    if not phone:
-        messages.error(request, 'Phone is required')
+    user_phone = getattr(request.user, 'phone_number', None)
+    if not user_phone:
+        messages.error(request, 'Please add your phone number in your profile before verifying payouts.')
         return redirect('storefront:store_edit', slug=slug)
+    if not getattr(request.user, 'phone_verified', False):
+        try:
+            return redirect(reverse('verify_phone') + f'?user_id={request.user.id}')
+        except Exception:
+            messages.error(request, 'Please verify your phone number before requesting payouts.')
+            return redirect('storefront:store_edit', slug=slug)
 
     mpesa = MpesaGateway()
     try:
-        phone_norm = mpesa._normalize_phone(phone)
+        phone_norm = mpesa._normalize_phone(user_phone)
     except Exception as e:
         messages.error(request, f'Invalid phone: {e}')
         return redirect('storefront:store_edit', slug=slug)

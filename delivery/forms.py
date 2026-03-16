@@ -35,6 +35,27 @@ class DeliveryProfileForm(forms.ModelForm):
             'city': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'City'}),
         }
 
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        # Lock phone when already verified on the main user profile
+        try:
+            if self.user and getattr(self.user, 'phone_verified', False):
+                self.fields['phone_number'].disabled = True
+                if getattr(self.user, 'phone_number', None):
+                    self.fields['phone_number'].initial = self.user.phone_number
+        except Exception:
+            pass
+
+    def clean_phone_number(self):
+        phone = self.cleaned_data.get('phone_number')
+        try:
+            if self.user and getattr(self.user, 'phone_verified', False):
+                return getattr(self.user, 'phone_number', phone)
+        except Exception:
+            pass
+        return phone
+
 
 class DeliveryRequestForm(forms.ModelForm):
     """Form for creating/updating delivery requests"""

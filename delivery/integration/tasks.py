@@ -5,6 +5,8 @@ from celery import shared_task
 from celery.utils.log import get_task_logger
 from datetime import datetime
 import time
+from django.utils import timezone
+from datetime import timedelta
 
 from .models import EcommercePlatform, WebhookEvent
 from .sync import OrderSyncService
@@ -76,7 +78,7 @@ def retry_failed_webhooks():
     """Retry failed webhook events"""
     failed_events = WebhookEvent.objects.filter(
         status='failed',
-        created_at__gte=datetime.now() - timedelta(hours=24)  # Last 24 hours
+        created_at__gte=timezone.now() - timedelta(hours=24)  # Last 24 hours
     )
     
     retried = 0
@@ -97,9 +99,6 @@ def retry_failed_webhooks():
 @shared_task
 def cleanup_old_webhooks():
     """Clean up old webhook events"""
-    from datetime import datetime, timedelta
-    from django.utils import timezone
-    
     cutoff_date = timezone.now() - timedelta(days=30)  # Keep 30 days
     
     deleted_count, _ = WebhookEvent.objects.filter(
