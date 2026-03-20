@@ -50,13 +50,32 @@ def _get_video_duration_seconds(uploaded_file):
                 os.remove(temp_path)
         except Exception:
             pass
+        # Rewind in-memory uploads so later save/upload code still sees the full file.
+        try:
+            if hasattr(uploaded_file, 'seek'):
+                uploaded_file.seek(0)
+        except Exception:
+            pass
 
 class MultiFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
 
 
+class MultiFileField(forms.FileField):
+    """FileField variant that accepts the list returned by a multiple file input."""
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('widget', MultiFileInput())
+        super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        single_file_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_file_clean(item, initial) for item in data]
+        return single_file_clean(data, initial)
+
+
 class ListingForm(forms.ModelForm):
-    video_descriptions = forms.FileField(
+    video_descriptions = MultiFileField(
         required=False,
         widget=MultiFileInput(attrs={
             'accept': 'video/*',
@@ -205,12 +224,15 @@ class ListingForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         category = cleaned_data.get('category')
+        valid_choices = {c[0] for c in Listing.HOMABAY_LOCATIONS}
 
         # Force listing location to store location (store-owned listings only)
         try:
             store = cleaned_data.get('store')
             if not store and self.instance and self.instance.pk:
                 store = getattr(self.instance, 'store', None)
+            submitted_location = cleaned_data.get('location')
+            existing_location = getattr(self.instance, 'location', None) if self.instance and self.instance.pk else None
             if store and getattr(store, 'location', None):
                 inferred = None
                 try:
@@ -234,10 +256,21 @@ class ListingForm(forms.ModelForm):
                             break
                 if inferred:
                     cleaned_data['location'] = inferred
+                elif submitted_location in valid_choices:
+                    # Preserve a valid client-selected code when the store text is too granular to infer cleanly.
+                    cleaned_data['location'] = submitted_location
+                elif existing_location in valid_choices:
+                    # Backward-compatible path for old listings whose store text no longer maps cleanly.
+                    cleaned_data['location'] = existing_location
                 else:
                     self.add_error('location', 'Store location must match a known listing location. Update the store location to proceed.')
             elif store and not getattr(store, 'location', None):
-                self.add_error('location', 'Store location is missing. Update the store location to proceed.')
+                if submitted_location in valid_choices:
+                    cleaned_data['location'] = submitted_location
+                elif existing_location in valid_choices:
+                    cleaned_data['location'] = existing_location
+                else:
+                    self.add_error('location', 'Store location is missing. Update the store location to proceed.')
         except Exception:
             pass
 

@@ -403,6 +403,27 @@ class StoreVideo(models.Model):
         return ''
 
 
+class StoreVideoLike(models.Model):
+    video = models.ForeignKey(StoreVideo, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='store_video_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['video', 'user']
+        ordering = ['-created_at']
+
+
+class StoreVideoComment(models.Model):
+    video = models.ForeignKey(StoreVideo, on_delete=models.CASCADE, related_name='reel_comments')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='store_video_comments')
+    comment = models.TextField(max_length=600)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
 class StoreReview(models.Model):
     """Review model for stores"""
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='reviews')

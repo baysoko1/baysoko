@@ -7,17 +7,17 @@ from django.db.models import Q, Count, Avg, F
 from django.db import utils as db_utils
 from django.db import IntegrityError, OperationalError
 from django.conf import settings
-from .models import Listing, Category, Favorite, Activity, RecentlyViewed, Review, Order, OrderItem, Cart, CartItem, Payment, Escrow, ListingImage, ListingVideo
+from .models import Listing, Category, Favorite, Activity, RecentlyViewed, Review, Order, OrderItem, Cart, CartItem, Payment, Escrow, ListingImage, ListingVideo, ListingVideoLike, ListingVideoComment
 from chats.models import Message
 from .forms import ListingForm, AIListingForm
-from storefront.models import Store, StoreVideo
+from storefront.models import Store, StoreVideo, StoreVideoLike, StoreVideoComment
 from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 from django.db.models import Q, Case, When, Value
 from blog.models import BlogPost
 from django.http import JsonResponse, HttpResponse
@@ -909,6 +909,18 @@ class ListingDetailView(DetailView):
         # Get all reviews for the listing
         reviews = listing.reviews.select_related('user').all()
         context['reviews'] = reviews
+        try:
+            context['reel_comments_preview'] = [
+                {
+                    'author': (review.user.get_full_name() or review.user.username) if getattr(review, 'user', None) else 'Anonymous',
+                    'comment': review.comment,
+                    'rating': review.rating,
+                    'created_at': review.created_at.isoformat() if getattr(review, 'created_at', None) else '',
+                }
+                for review in reviews if getattr(review, 'comment', None)
+            ][:8]
+        except Exception:
+            context['reel_comments_preview'] = []
 
         # Calculate average rating
         avg_rating = listing.reviews.aggregate(
@@ -1210,6 +1222,18 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
         # Handle listing video descriptions (max 3)
         videos = self.request.FILES.getlist('video_descriptions')
         if videos:
+            for video in videos:
+                try:
+                    ct = getattr(video, 'content_type', '') or ''
+                    size = getattr(video, 'size', 0) or 0
+                    if not ct.startswith('video/'):
+                        messages.error(self.request, f"{getattr(video, 'name', 'Video')} is not a valid video file.")
+                        continue
+                    if size > 15 * 1024 * 1024:
+                        messages.error(self.request, f"{getattr(video, 'name', 'Video')} is still larger than 15MB after processing.")
+                except Exception:
+                    pass
+        if videos:
             existing_count = form.instance.videos.count()
             if existing_count + len(videos) > 3:
                 messages.error(self.request, "You can upload up to 3 video descriptions per listing.")
@@ -1217,15 +1241,19 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
                 return render(self.request, 'listings/listing_form.html', context)
             start_order = existing_count
             for idx, video in enumerate(videos):
-                created_video = ListingVideo.objects.create(
-                    listing=form.instance,
-                    video=video,
-                    order=start_order + idx
-                )
-                if not _enforce_cloudinary_video_duration(created_video):
-                    messages.error(self.request, "A video longer than 45 seconds was removed.")
-                    continue
-                _broadcast_reel_created(created_video)
+                try:
+                    created_video = ListingVideo.objects.create(
+                        listing=form.instance,
+                        video=video,
+                        order=start_order + idx
+                    )
+                    if not _enforce_cloudinary_video_duration(created_video):
+                        messages.error(self.request, "A video longer than 45 seconds was removed.")
+                        continue
+                    _broadcast_reel_created(created_video)
+                except Exception as e:
+                    logger.exception('Failed to save listing video: %s', e)
+                    messages.error(self.request, "We couldn't save one of your videos. Please try again.")
 
         # Create activity log
         Activity.objects.create(
@@ -1370,9 +1398,26 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         if self.object.store:
             kwargs['initial']['store'] = self.object.store
         return kwargs
+
+    def form_invalid(self, form):
+        try:
+            for field, errs in form.errors.items():
+                for err in errs:
+                    label = "Form" if field == "__all__" else field.replace('_', ' ').title()
+                    messages.error(self.request, f"{label}: {err}")
+        except Exception:
+            messages.error(self.request, "Please correct the highlighted errors and try again.")
+        context = self.get_context_data(form=form)
+        return render(self.request, 'listings/listing_form.html', context)
     def test_func(self):
         listing = self.get_object()
         return self.request.user == listing.seller
+
+    def get_success_url(self):
+        try:
+            return self.object.get_absolute_url()
+        except Exception:
+            return reverse('listing-detail', args=[self.object.pk])
 
     # Update the ListingUpdateView class form_valid method
     def form_valid(self, form):
@@ -1481,22 +1526,27 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         # Handle listing video uploads (max 3 total)
         videos = self.request.FILES.getlist('video_descriptions')
         if videos:
-            existing_count = form.instance.videos.count()
+            delete_ids = self.request.POST.getlist('delete_videos') if 'delete_videos' in self.request.POST else []
+            existing_count = form.instance.videos.exclude(id__in=delete_ids).count()
             if existing_count + len(videos) > 3:
                 messages.error(self.request, "You can upload up to 3 video descriptions per listing.")
                 context = self.get_context_data(form=form)
                 return render(self.request, 'listings/listing_form.html', context)
             start_order = existing_count
             for idx, video in enumerate(videos):
-                created_video = ListingVideo.objects.create(
-                    listing=form.instance,
-                    video=video,
-                    order=start_order + idx
-                )
-                if not _enforce_cloudinary_video_duration(created_video):
-                    messages.error(self.request, "A video longer than 45 seconds was removed.")
-                    continue
-                _broadcast_reel_created(created_video)
+                try:
+                    created_video = ListingVideo.objects.create(
+                        listing=form.instance,
+                        video=video,
+                        order=start_order + idx
+                    )
+                    if not _enforce_cloudinary_video_duration(created_video):
+                        messages.error(self.request, "A video longer than 45 seconds was removed.")
+                        continue
+                    _broadcast_reel_created(created_video)
+                except Exception as e:
+                    logger.exception('Failed to save listing update video: %s', e)
+                    messages.error(self.request, "We couldn't save one of the uploaded videos.")
         
         # Create activity log
         Activity.objects.create(
@@ -2122,32 +2172,61 @@ def toggle_favorite(request, listing_id):
 def reel_action(request, kind, video_id, action):
     if kind == 'store':
         video = get_object_or_404(StoreVideo, id=video_id)
+        like_model = StoreVideoLike
+        comment_model = StoreVideoComment
     else:
         video = get_object_or_404(ListingVideo, id=video_id)
+        like_model = ListingVideoLike
+        comment_model = ListingVideoComment
     valid_actions = {
-        'like': 'likes_count',
-        'comment': 'comments_count',
         'share': 'shares_count',
         'view': 'views_count',
     }
-    if action not in valid_actions:
-        return JsonResponse({'success': False, 'error': 'Invalid action.'}, status=400)
+    if action == 'like':
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Login required.'}, status=401)
+        try:
+            like_obj, created = like_model.objects.get_or_create(video=video, user=request.user)
+            model_cls = StoreVideo if kind == 'store' else ListingVideo
+            if created:
+                model_cls.objects.filter(id=video.id).update(likes_count=F('likes_count') + 1)
+                liked = True
+            else:
+                like_obj.delete()
+                model_cls.objects.filter(id=video.id, likes_count__gt=0).update(likes_count=F('likes_count') - 1)
+                liked = False
+            video.refresh_from_db(fields=['likes_count', 'comments_count', 'shares_count', 'views_count'])
+        except Exception:
+            return JsonResponse({'success': False, 'error': 'Unable to update like.'}, status=500)
+        payload = {
+            'kind': kind if kind == 'store' else 'listing',
+            'video_id': video.id,
+            'likes_count': video.likes_count,
+            'comments_count': video.comments_count,
+            'shares_count': video.shares_count,
+            'views_count': video.views_count,
+            'liked': liked,
+        }
+    else:
+        if action not in valid_actions:
+            return JsonResponse({'success': False, 'error': 'Invalid action.'}, status=400)
 
-    field = valid_actions[action]
-    try:
-        model_cls = StoreVideo if kind == 'store' else ListingVideo
-        model_cls.objects.filter(id=video.id).update(**{field: F(field) + 1})
-        video.refresh_from_db(fields=[field, 'likes_count', 'comments_count', 'shares_count', 'views_count'])
-    except Exception:
-        return JsonResponse({'success': False, 'error': 'Unable to update count.'}, status=500)
+        field = valid_actions[action]
+        try:
+            model_cls = StoreVideo if kind == 'store' else ListingVideo
+            model_cls.objects.filter(id=video.id).update(**{field: F(field) + 1})
+            video.refresh_from_db(fields=[field, 'likes_count', 'comments_count', 'shares_count', 'views_count'])
+        except Exception:
+            return JsonResponse({'success': False, 'error': 'Unable to update count.'}, status=500)
 
-    payload = {
-        'video_id': video.id,
-        'likes_count': video.likes_count,
-        'comments_count': video.comments_count,
-        'shares_count': video.shares_count,
-        'views_count': video.views_count,
-    }
+        payload = {
+            'kind': kind if kind == 'store' else 'listing',
+            'video_id': video.id,
+            'likes_count': video.likes_count,
+            'comments_count': video.comments_count,
+            'shares_count': video.shares_count,
+            'views_count': video.views_count,
+        }
 
     try:
         channel_layer = get_channel_layer()
@@ -2160,6 +2239,92 @@ def reel_action(request, kind, video_id, action):
         pass
 
     return JsonResponse({'success': True, **payload})
+
+
+@require_http_methods(["GET", "POST"])
+def reel_comments(request, kind, video_id):
+    if kind == 'store':
+        video = get_object_or_404(StoreVideo, id=video_id)
+        comment_model = StoreVideoComment
+        like_model = StoreVideoLike
+        model_cls = StoreVideo
+    else:
+        video = get_object_or_404(ListingVideo, id=video_id)
+        comment_model = ListingVideoComment
+        like_model = ListingVideoLike
+        model_cls = ListingVideo
+
+    if request.method == 'POST':
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Login required.'}, status=401)
+        payload = {}
+        raw_body = ''
+        try:
+            raw_body = request.body.decode('utf-8') if request.body else ''
+            payload = json.loads(raw_body or '{}')
+        except Exception:
+            payload = {}
+        comment_text = (
+            payload.get('comment')
+            or request.POST.get('comment')
+            or request.headers.get('X-Reel-Comment')
+            or ''
+        ).strip()
+        if not comment_text and raw_body and 'comment=' in raw_body:
+            try:
+                from urllib.parse import parse_qs
+                comment_text = (parse_qs(raw_body).get('comment') or [''])[0].strip()
+            except Exception:
+                comment_text = ''
+        if not comment_text:
+            return JsonResponse({'success': False, 'error': 'Comment cannot be empty.'}, status=400)
+        if len(comment_text) > 600:
+            return JsonResponse({'success': False, 'error': 'Comment must be 600 characters or less.'}, status=400)
+
+        comment = comment_model.objects.create(video=video, user=request.user, comment=comment_text)
+        model_cls.objects.filter(id=video.id).update(comments_count=F('comments_count') + 1)
+        video.refresh_from_db(fields=['likes_count', 'comments_count', 'shares_count', 'views_count'])
+        comments_payload = [{
+            'id': comment.id,
+            'author': request.user.get_full_name() or request.user.username,
+            'comment': comment.comment,
+            'rating': None,
+            'created_at': comment.created_at.isoformat() if comment.created_at else '',
+        }]
+    else:
+        comments_payload = [{
+            'id': comment.id,
+            'author': comment.user.get_full_name() or comment.user.username,
+            'comment': comment.comment,
+            'rating': None,
+            'created_at': comment.created_at.isoformat() if comment.created_at else '',
+        } for comment in comment_model.objects.filter(video=video).select_related('user').order_by('-created_at')[:20]]
+
+    response_payload = {
+        'success': True,
+        'comments': comments_payload,
+        'count': video.comments_count if request.method == 'GET' else video.comments_count,
+        'liked': request.user.is_authenticated and like_model.objects.filter(video=video, user=request.user).exists(),
+        'likes_count': video.likes_count,
+        'comments_count': video.comments_count,
+        'shares_count': video.shares_count,
+        'views_count': video.views_count,
+        'kind': kind if kind == 'store' else 'listing',
+        'video_id': video.id,
+    }
+
+    if request.method == 'POST':
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'reels',
+                    {'type': 'reel_update', 'payload': response_payload}
+                )
+        except Exception:
+            pass
+
+    return JsonResponse(response_payload)
 
 @login_required
 def user_favorites(request):

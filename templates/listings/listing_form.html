@@ -274,6 +274,79 @@
         aspect-ratio: 1;
         border: 2px solid var(--border-color);
     }
+    .trim-video-btn,
+    .video-status-badge,
+    .video-processing-badge,
+    .video-ready-badge {
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        right: 8px;
+        padding: 0.3rem 0.5rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-color);
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--text-primary);
+        font-size: 0.7rem;
+        font-weight: 600;
+        cursor: pointer;
+        z-index: 3;
+    }
+    .video-status-badge {
+        top: 8px;
+        bottom: auto;
+        left: 8px;
+        right: auto;
+        cursor: default;
+        background: rgba(var(--accent-rgb, 6, 214, 160), 0.15);
+        border-color: rgba(var(--accent-rgb, 6, 214, 160), 0.5);
+        color: var(--text-primary);
+    }
+    .video-processing-badge {
+        top: 8px;
+        bottom: auto;
+        left: 8px;
+        right: auto;
+        cursor: default;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        background: rgba(255, 158, 31, 0.18);
+        border-color: rgba(255, 158, 31, 0.55);
+        color: var(--text-primary);
+    }
+    .video-ready-badge {
+        top: 8px;
+        bottom: auto;
+        left: 8px;
+        right: auto;
+        cursor: default;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        background: rgba(6, 214, 160, 0.18);
+        border-color: rgba(6, 214, 160, 0.55);
+        color: var(--text-primary);
+    }
+    [data-theme="dark"] .trim-video-btn,
+    [data-theme="dark"] .video-status-badge,
+    [data-theme="dark"] .video-processing-badge,
+    [data-theme="dark"] .video-ready-badge {
+        background: rgba(16, 16, 16, 0.92);
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+    .video-spinner {
+        width: 0.8rem;
+        height: 0.8rem;
+        border: 2px solid rgba(255, 255, 255, 0.28);
+        border-top-color: currentColor;
+        border-radius: 50%;
+        animation: listingVideoSpin 0.8s linear infinite;
+    }
+    @keyframes listingVideoSpin {
+        to { transform: rotate(360deg); }
+    }
     .preview-img {
         width: 100%;
         height: 100%;
@@ -381,8 +454,26 @@
         </div>
     </div>
 
-    <form method="post" enctype="multipart/form-data" id="listing-form" novalidate>
+    <form method="post" enctype="multipart/form-data" id="listing-form" data-is-update="{% if form.instance.pk %}true{% else %}false{% endif %}" novalidate>
         {% csrf_token %}
+        {% if form.errors %}
+        <div class="form-section-card" style="border-left: 4px solid var(--danger);">
+            <div class="section-header">
+                <div class="section-icon" style="background: var(--danger);"><i class="bi bi-exclamation-triangle"></i></div>
+                <div>
+                    <h2 class="section-title">Please Fix The Errors Below</h2>
+                    <p class="section-description">Some fields need attention before we can save your listing.</p>
+                </div>
+            </div>
+            <ul class="m-0 ps-3">
+                {% for field, errs in form.errors.items %}
+                    {% for err in errs %}
+                        <li class="text-danger small">{{ field }}: {{ err }}</li>
+                    {% endfor %}
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
 
         <!-- Step 1: Basic Info -->
         <div class="form-section-card active-step" id="step-1">
@@ -764,7 +855,7 @@
                 <div class="upload-card" id="listing-videos-upload-area">
                     <div class="upload-icon"><i class="bi bi-camera-video"></i></div>
                     <div class="upload-title">Add short video descriptions</div>
-                    <div class="upload-subtitle">Max 45 seconds · 15MB each</div>
+                    <div class="upload-subtitle">Max 45 seconds · 15MB each (auto‑trim/compress if needed)</div>
                     <input type="file" name="video_descriptions" id="id_video_descriptions" accept="video/*" multiple class="d-none">
                     <button type="button" class="upload-btn" onclick="document.getElementById('id_video_descriptions').click()">
                         <i class="bi bi-folder2-open"></i> Choose
@@ -795,8 +886,8 @@
 
         <!-- Navigation -->
         <div class="step-navigation">
-            <button type="button" class="nav-btn prev" id="prevBtn" disabled><i class="bi bi-arrow-left"></i> Prev</button>
-            <button type="button" class="nav-btn next" id="nextBtn">Next <i class="bi bi-arrow-right"></i></button>
+            <button type="button" class="nav-btn prev" id="prevBtn" disabled onclick="return window.__listingWizardGo && window.__listingWizardGo(-1);"><i class="bi bi-arrow-left"></i> Prev</button>
+            <button type="button" class="nav-btn next" id="nextBtn" onclick="return window.__listingWizardGo && window.__listingWizardGo(1);">Next <i class="bi bi-arrow-right"></i></button>
             <button type="submit" class="nav-btn submit" id="submitBtn" style="display:none;">
                 {% if form.instance.pk %}Update{% else %}Create{% endif %}
             </button>
@@ -806,9 +897,20 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ form.errors|json_script:"listingFormErrors" }}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    try {
+        const raw = document.getElementById('listingFormErrors');
+        if (raw && raw.textContent && window.showToast) {
+            const data = JSON.parse(raw.textContent || '{}');
+            Object.keys(data || {}).forEach(key => {
+                (data[key] || []).forEach(msg => showToast(`${key}: ${msg}`, 'error'));
+            });
+        }
+    } catch (e) {}
     // Dynamic fields rendering logic
+    try {
     (function(){
         const schemasElement = document.getElementById('category-schemas');
         let categorySchemas = {};
@@ -899,14 +1001,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Call it whenever category changes
-        categorySelect.addEventListener('change', function() {
-            // … your existing dynamic fields render …
-            applyStandardFieldsVisibility(this.value);
-        });
+        if (categorySelect) {
+            categorySelect.addEventListener('change', function() {
+                // … your existing dynamic fields render …
+                applyStandardFieldsVisibility(this.value);
+            });
 
-        // Also call on page load for the initially selected category
-        if (categorySelect.value) {
-            applyStandardFieldsVisibility(categorySelect.value);
+            // Also call on page load for the initially selected category
+            if (categorySelect.value) {
+                applyStandardFieldsVisibility(categorySelect.value);
+            }
         }
 
         if(categorySelect){
@@ -920,9 +1024,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // On form submit collect values into hidden input
-        const formEl = document.getElementById('listing-form');
-        if(formEl){
-            formEl.addEventListener('submit', function(e){
+        const dynamicFormEl = document.getElementById('listing-form');
+        if(dynamicFormEl){
+            dynamicFormEl.addEventListener('submit', function(){
+                if (!dynamicFieldsDiv || !dynamicInput) return;
                 const data = {};
                 const inputs = dynamicFieldsDiv.querySelectorAll('[name^="dynamic_"]');
                 inputs.forEach(inp => {
@@ -939,6 +1044,9 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
     })();
+    } catch (e) {
+        console.warn('Dynamic fields init failed', e);
+    }
 
     // ===== STEP WIZARD =====
     const steps = [1,2,3,4];
@@ -954,6 +1062,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const prevBtn = document.getElementById('prevBtn');
     const nextBtn = document.getElementById('nextBtn');
     const submitBtn = document.getElementById('submitBtn');
+    if (!prevBtn || !nextBtn || !submitBtn || !sections[1]) {
+        return;
+    }
 
     function showStep(step) {
         Object.values(sections).forEach(s => s.style.display = 'none');
@@ -976,29 +1087,89 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // If there are server-side errors, jump to the step containing them.
+    try {
+        const errorEl = document.querySelector('#listing-form .error-feedback, #listing-form .text-danger, #listing-form .is-invalid');
+        if (errorEl) {
+            const stepEl = errorEl.closest('.form-section-card');
+            if (stepEl && stepEl.id) {
+                const match = stepEl.id.match(/step-(\d+)/);
+                if (match) {
+                    currentStep = parseInt(match[1], 10);
+                }
+            }
+        }
+    } catch (e) {}
+
+    const formEl = document.getElementById('listing-form');
+    function isFieldSkippable(field) {
+        if (!field) return true;
+        if (field.disabled) return true;
+        if (field.type === 'hidden') return true;
+        if (field.hasAttribute('data-skip-validation')) return true;
+        const style = window.getComputedStyle(field);
+        if (style.display === 'none' || style.visibility === 'hidden') return true;
+        // offsetParent is null for hidden elements (unless fixed)
+        if (field.offsetParent === null && style.position !== 'fixed') return true;
+        return false;
+    }
+
+    function getFieldLabel(field) {
+        if (!field) return 'a required field';
+        const id = field.id;
+        if (id) {
+            const lbl = document.querySelector(`label[for="${id}"]`);
+            if (lbl) return (lbl.textContent || '').replace('*', '').trim() || 'a required field';
+        }
+        const wrap = field.closest('.form-group');
+        if (wrap) {
+            const lbl = wrap.querySelector('label');
+            if (lbl) return (lbl.textContent || '').replace('*', '').trim() || 'a required field';
+        }
+        return 'a required field';
+    }
+
+    function markInvalid(field) {
+        try {
+            field.classList.add('is-invalid');
+            field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            field.focus({ preventScroll: true });
+        } catch (e) {}
+        try {
+            const label = getFieldLabel(field);
+            if (window.showToast) {
+                showToast(`Please fill: ${label}`, 'warning');
+            }
+        } catch (e) {}
+    }
+
     function validateStep(step) {
         const section = sections[step];
         if (!section) return true;
         const required = section.querySelectorAll('[required]');
         for (let field of required) {
             try {
+                if (isFieldSkippable(field)) {
+                    continue;
+                }
                 const tag = (field.tagName || '').toLowerCase();
                 if (tag === 'input') {
                     const type = (field.type || '').toLowerCase();
                     if (type === 'checkbox') {
-                        if (!field.checked) { field.classList.add('is-invalid'); return false; }
+                        if (!field.checked) { markInvalid(field); return false; }
                         field.classList.remove('is-invalid');
                     } else if (type === 'file') {
-                        if (!field.files || field.files.length === 0) { field.classList.add('is-invalid'); return false; }
+                        const isUpdate = !!(formEl && formEl.dataset.isUpdate === 'true');
+                        if (!isUpdate && (!field.files || field.files.length === 0)) { markInvalid(field); return false; }
                         field.classList.remove('is-invalid');
                     } else {
                         const v = field.value || '';
-                        if (String(v).trim() === '') { field.classList.add('is-invalid'); return false; }
+                        if (String(v).trim() === '') { markInvalid(field); return false; }
                         field.classList.remove('is-invalid');
                     }
                 } else if (tag === 'select' || tag === 'textarea') {
                     const v = field.value || '';
-                    if (String(v).trim() === '') { field.classList.add('is-invalid'); return false; }
+                    if (String(v).trim() === '') { markInvalid(field); return false; }
                     field.classList.remove('is-invalid');
                 } else {
                     // Not a standard input/select/textarea; skip validation
@@ -1015,7 +1186,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     nextBtn.addEventListener('click', function() {
         if (!validateStep(currentStep)) {
-            alert('Please fill all required fields in this section.');
+            try {
+                showToast('Please fill all required fields in this section.', 'warning');
+            } catch (err) {}
             return;
         }
         if (currentStep < totalSteps) {
@@ -1031,16 +1204,34 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Mark wizard as bound for fallback script
+    window.__listingWizardBound = true;
+    if (formEl) {
+        formEl.setAttribute('data-wizard-bound', 'true');
+    }
+
     document.getElementById('listing-form').addEventListener('submit', function(e) {
         for (let s of steps) {
             if (!validateStep(s)) {
                 e.preventDefault();
                 showStep(s);
-                alert('Please complete all required fields.');
+                try {
+                    showToast('Please complete all required fields before saving.', 'warning');
+                } catch (err) {}
                 return;
             }
         }
+        if (isTrimmingVideo) {
+            e.preventDefault();
+            try {
+                showToast('Video is still processing. Please wait a moment…', 'warning');
+            } catch (err) {}
+            return;
+        }
     });
+
+    // Ensure first step is shown after initialization.
+    showStep(currentStep);
 
     // Character counters
     const titleField = document.getElementById('{{ form.title.id_for_label }}');
@@ -1103,9 +1294,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const videoInput = document.getElementById('id_video_descriptions');
     const videoPreview = document.getElementById('listing-videos-preview');
     const videoErrors = document.getElementById('video-errors');
+    let listingVideoFiles = [];
+    let isTrimmingVideo = false;
+    let pendingVideoChecks = 0;
     if (videoInput) {
         videoInput.addEventListener('change', function() {
             const files = Array.from(this.files || []);
+            listingVideoFiles = files;
             let invalid = false;
             if (videoErrors) {
                 videoErrors.style.display = 'none';
@@ -1119,15 +1314,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     videoErrors.style.display = 'block';
                 }
             }
+            pendingVideoChecks = 0;
+
             files.forEach((file) => {
                 if (!file.type.startsWith('video/')) {
                     invalid = true;
-                    return;
-                }
-                if (file.size > 15 * 1024 * 1024) {
-                    invalid = true;
                     if (videoErrors) {
-                        videoErrors.textContent = 'Each video must be 15MB or smaller.';
+                        videoErrors.textContent = `${file.name || 'Selected file'} is not a valid video file.`;
                         videoErrors.style.display = 'block';
                     }
                     return;
@@ -1137,15 +1330,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 vid.src = url;
                 vid.muted = true;
                 vid.playsInline = true;
-                vid.addEventListener('loadedmetadata', () => {
-                    if (vid.duration > 45) {
-                        invalid = true;
-                        if (videoErrors) {
-                            videoErrors.textContent = 'Videos must be 45 seconds or shorter.';
-                            videoErrors.style.display = 'block';
-                        }
-                    }
-                });
+                vid.preload = 'metadata';
                 const wrap = document.createElement('div');
                 wrap.className = 'preview-item';
                 wrap.appendChild(vid);
@@ -1153,9 +1338,53 @@ document.addEventListener('DOMContentLoaded', function() {
                 badge.className = 'preview-badge';
                 badge.textContent = 'New';
                 wrap.appendChild(badge);
+                const processingBadge = document.createElement('span');
+                processingBadge.className = 'video-processing-badge';
+                processingBadge.innerHTML = '<span class="video-spinner"></span> Checking';
+                wrap.appendChild(processingBadge);
                 if (videoPreview) videoPreview.appendChild(wrap);
+
+                pendingVideoChecks += 1;
+                vid.addEventListener('loadedmetadata', () => {
+                    pendingVideoChecks = Math.max(0, pendingVideoChecks - 1);
+                    const tooLong = vid.duration > 45;
+                    const tooLarge = file.size > 15 * 1024 * 1024;
+                    if (processingBadge.parentNode) processingBadge.remove();
+                    const status = document.createElement('span');
+                    status.className = (tooLong || tooLarge) ? 'video-status-badge' : 'video-ready-badge';
+                    status.innerHTML = (tooLong || tooLarge)
+                        ? `<i class="bi bi-exclamation-circle"></i> ${tooLong ? 'Over 45s' : 'Over 15MB'}`
+                        : '<i class="bi bi-check-circle-fill"></i> Ready';
+                    wrap.appendChild(status);
+                    if (tooLong || tooLarge) {
+                        invalid = true;
+                        if (videoErrors) {
+                            videoErrors.textContent = tooLong
+                                ? `${file.name || 'Video'} is longer than 45 seconds.`
+                                : `${file.name || 'Video'} is larger than 15MB.`;
+                            videoErrors.style.display = 'block';
+                        }
+                    }
+                    if (submitBtn) submitBtn.disabled = invalid || pendingVideoChecks > 0;
+                    URL.revokeObjectURL(url);
+                }, { once: true });
+                vid.addEventListener('error', () => {
+                    pendingVideoChecks = Math.max(0, pendingVideoChecks - 1);
+                    invalid = true;
+                    if (processingBadge.parentNode) processingBadge.remove();
+                    const status = document.createElement('span');
+                    status.className = 'video-status-badge';
+                    status.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i> Invalid';
+                    wrap.appendChild(status);
+                    if (videoErrors) {
+                        videoErrors.textContent = `${file.name || 'Video'} could not be read.`;
+                        videoErrors.style.display = 'block';
+                    }
+                    if (submitBtn) submitBtn.disabled = true;
+                    URL.revokeObjectURL(url);
+                }, { once: true });
             });
-            if (submitBtn) submitBtn.disabled = invalid;
+            if (submitBtn) submitBtn.disabled = invalid || pendingVideoChecks > 0;
         });
     }
 
@@ -1351,5 +1580,254 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     updateLocationFromStore();
 });
+</script>
+<script>
+// Fallback wizard binding in case earlier scripts failed to load.
+document.addEventListener('DOMContentLoaded', function() {
+    const formEl = document.getElementById('listing-form');
+    if (window.__listingWizardBound || (formEl && formEl.getAttribute('data-wizard-bound') === 'true')) {
+        return;
+    }
+
+    const steps = [1, 2, 3, 4];
+    const sections = {
+        1: document.getElementById('step-1'),
+        2: document.getElementById('step-2'),
+        3: document.getElementById('step-3'),
+        4: document.getElementById('step-4')
+    };
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    if (!prevBtn || !nextBtn || !submitBtn || !sections[1]) {
+        return;
+    }
+
+    function isFieldSkippable(field) {
+        if (!field) return true;
+        if (field.disabled) return true;
+        if (field.type === 'hidden') return true;
+        if (field.hasAttribute('data-skip-validation')) return true;
+        const style = window.getComputedStyle(field);
+        if (style.display === 'none' || style.visibility === 'hidden') return true;
+        if (field.offsetParent === null && style.position !== 'fixed') return true;
+        return false;
+    }
+
+    function getFieldLabel(field) {
+        if (!field) return 'a required field';
+        const id = field.id;
+        if (id) {
+            const lbl = document.querySelector(`label[for="${id}"]`);
+            if (lbl) return (lbl.textContent || '').replace('*', '').trim() || 'a required field';
+        }
+        const wrap = field.closest('.form-group');
+        if (wrap) {
+            const lbl = wrap.querySelector('label');
+            if (lbl) return (lbl.textContent || '').replace('*', '').trim() || 'a required field';
+        }
+        return 'a required field';
+    }
+
+    function markInvalid(field) {
+        try {
+            field.classList.add('is-invalid');
+            field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            field.focus({ preventScroll: true });
+        } catch (e) {}
+        try {
+            const label = getFieldLabel(field);
+            if (window.showToast) showToast(`Please fill: ${label}`, 'warning');
+        } catch (e) {}
+    }
+
+    function validateStep(step) {
+        const section = sections[step];
+        if (!section) return true;
+        const required = section.querySelectorAll('[required]');
+        for (let field of required) {
+            try {
+                if (isFieldSkippable(field)) continue;
+                const tag = (field.tagName || '').toLowerCase();
+                if (tag === 'input') {
+                    const type = (field.type || '').toLowerCase();
+                    if (type === 'checkbox') {
+                        if (!field.checked) { markInvalid(field); return false; }
+                    } else if (type === 'file') {
+                        const isUpdate = !!(formEl && formEl.dataset.isUpdate === 'true');
+                        if (!isUpdate && (!field.files || field.files.length === 0)) { markInvalid(field); return false; }
+                    } else {
+                        const v = field.value || '';
+                        if (String(v).trim() === '') { markInvalid(field); return false; }
+                    }
+                } else if (tag === 'select' || tag === 'textarea') {
+                    const v = field.value || '';
+                    if (String(v).trim() === '') { markInvalid(field); return false; }
+                }
+            } catch (err) {
+                continue;
+            }
+        }
+        return true;
+    }
+
+    function showStep(step) {
+        Object.values(sections).forEach(s => s.style.display = 'none');
+        sections[step].style.display = 'block';
+        prevBtn.disabled = (step === 1);
+        if (step === steps.length) {
+            nextBtn.style.display = 'none';
+            submitBtn.style.display = 'inline-flex';
+        } else {
+            nextBtn.style.display = 'inline-flex';
+            submitBtn.style.display = 'none';
+        }
+    }
+
+    let currentStep = 1;
+    const active = document.querySelector('.form-section-card.active-step');
+    if (active && active.id) {
+        const match = active.id.match(/step-(\d+)/);
+        if (match) currentStep = parseInt(match[1], 10);
+    }
+    showStep(currentStep);
+
+    nextBtn.addEventListener('click', function() {
+        if (!validateStep(currentStep)) return;
+        if (currentStep < steps.length) {
+            currentStep++;
+            showStep(currentStep);
+        }
+    });
+    prevBtn.addEventListener('click', function() {
+        if (currentStep > 1) {
+            currentStep--;
+            showStep(currentStep);
+        }
+    });
+    if (formEl) {
+        formEl.addEventListener('submit', function(e) {
+            for (let s of steps) {
+                if (!validateStep(s)) {
+                    e.preventDefault();
+                    showStep(s);
+                    return;
+                }
+            }
+        });
+    }
+
+    window.__listingWizardBound = true;
+    if (formEl) formEl.setAttribute('data-wizard-bound', 'true');
+});
+</script>
+<script>
+// Inline-safe handler for Next/Prev buttons (works even if event listeners fail)
+(function(){
+    function isFieldSkippable(field) {
+        if (!field) return true;
+        if (field.disabled) return true;
+        if (field.type === 'hidden') return true;
+        if (field.hasAttribute('data-skip-validation')) return true;
+        const style = window.getComputedStyle(field);
+        if (style.display === 'none' || style.visibility === 'hidden') return true;
+        if (field.offsetParent === null && style.position !== 'fixed') return true;
+        return false;
+    }
+    function getFieldLabel(field) {
+        if (!field) return 'a required field';
+        const id = field.id;
+        if (id) {
+            const lbl = document.querySelector(`label[for="${id}"]`);
+            if (lbl) return (lbl.textContent || '').replace('*', '').trim() || 'a required field';
+        }
+        const wrap = field.closest('.form-group');
+        if (wrap) {
+            const lbl = wrap.querySelector('label');
+            if (lbl) return (lbl.textContent || '').replace('*', '').trim() || 'a required field';
+        }
+        return 'a required field';
+    }
+    function markInvalid(field) {
+        try {
+            field.classList.add('is-invalid');
+            field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            field.focus({ preventScroll: true });
+        } catch (e) {}
+        try {
+            const label = getFieldLabel(field);
+            if (window.showToast) showToast(`Please fill: ${label}`, 'warning');
+        } catch (e) {}
+    }
+    function validateStep(section, formEl) {
+        if (!section) return true;
+        const required = section.querySelectorAll('[required]');
+        for (let field of required) {
+            try {
+                if (isFieldSkippable(field)) continue;
+                const tag = (field.tagName || '').toLowerCase();
+                if (tag === 'input') {
+                    const type = (field.type || '').toLowerCase();
+                    if (type === 'checkbox') {
+                        if (!field.checked) { markInvalid(field); return false; }
+                    } else if (type === 'file') {
+                        const isUpdate = !!(formEl && formEl.dataset.isUpdate === 'true');
+                        if (!isUpdate && (!field.files || field.files.length === 0)) { markInvalid(field); return false; }
+                    } else {
+                        const v = field.value || '';
+                        if (String(v).trim() === '') { markInvalid(field); return false; }
+                    }
+                } else if (tag === 'select' || tag === 'textarea') {
+                    const v = field.value || '';
+                    if (String(v).trim() === '') { markInvalid(field); return false; }
+                }
+            } catch (err) {}
+        }
+        return true;
+    }
+    function showStep(step, sections, prevBtn, nextBtn, submitBtn) {
+        Object.values(sections).forEach(s => s && (s.style.display = 'none'));
+        if (sections[step]) sections[step].style.display = 'block';
+        if (prevBtn) prevBtn.disabled = (step === 1);
+        if (nextBtn && submitBtn) {
+            if (step === Object.keys(sections).length) {
+                nextBtn.style.display = 'none';
+                submitBtn.style.display = 'inline-flex';
+            } else {
+                nextBtn.style.display = 'inline-flex';
+                submitBtn.style.display = 'none';
+            }
+        }
+    }
+
+    window.__listingWizardGo = function(direction){
+        const formEl = document.getElementById('listing-form');
+        const sections = {
+            1: document.getElementById('step-1'),
+            2: document.getElementById('step-2'),
+            3: document.getElementById('step-3'),
+            4: document.getElementById('step-4')
+        };
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const submitBtn = document.getElementById('submitBtn');
+        if (!sections[1] || !nextBtn || !prevBtn) return false;
+
+        let currentStep = 1;
+        Object.entries(sections).forEach(([k, el]) => {
+            if (el && el.style.display !== 'none' && el.offsetParent !== null) {
+                currentStep = parseInt(k, 10);
+            }
+        });
+        if (direction > 0) {
+            if (!validateStep(sections[currentStep], formEl)) return false;
+            if (currentStep < Object.keys(sections).length) currentStep += 1;
+        } else {
+            if (currentStep > 1) currentStep -= 1;
+        }
+        showStep(currentStep, sections, prevBtn, nextBtn, submitBtn);
+        return false;
+    };
+})();
 </script>
 {% endblock %}

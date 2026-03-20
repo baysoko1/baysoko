@@ -3907,6 +3907,7 @@
             let deferredPrompt = null;
             let repromptTimer = null;
             const installBtn = document.getElementById('pwaInstallBtn');
+            const installTriggers = Array.from(document.querySelectorAll('[data-pwa-install-trigger]'));
             const banner = document.getElementById('pwaInstallBanner');
             const closeBtn = document.getElementById('pwaInstallClose');
             const dismissedKey = 'baysoko_pwa_banner_dismissed_at';
@@ -3952,33 +3953,44 @@
                 repromptTimer = setTimeout(() => {
                     try {
                         const dismissedAt = parseInt(localStorage.getItem(dismissedKey) || '0', 10);
-                        if (dismissedAt && (Date.now() - dismissedAt) < 1000 * 60 * 20) return;
+                        if (dismissedAt && (Date.now() - dismissedAt) < 1000 * 60 * 5) return;
                     } catch (e) {}
                     showBanner();
-                }, 1000 * 60 * 20);
+                }, 1000 * 60 * 5);
             }
 
             window.addEventListener('beforeinstallprompt', (event) => {
                 event.preventDefault();
                 deferredPrompt = event;
                 try {
-                    if (localStorage.getItem(installedKey)) return;
+                    localStorage.removeItem(installedKey);
                     if (localStorage.getItem(neverKey)) return;
                     const dismissedAt = parseInt(localStorage.getItem(dismissedKey) || '0', 10);
-                    const cooldownMs = 1000 * 60 * 20;
+                    const cooldownMs = 1000 * 60 * 5;
                     if (dismissedAt && (Date.now() - dismissedAt) < cooldownMs) return;
                 } catch (e) {}
                 showBanner();
             });
+            async function handleInstallPrompt() {
+                if (!deferredPrompt) {
+                    showBanner();
+                    return;
+                }
+                deferredPrompt.prompt();
+                try { await deferredPrompt.userChoice; } catch (e) {}
+                deferredPrompt = null;
+                hideBanner();
+            }
             if (installBtn) {
                 installBtn.addEventListener('click', async () => {
-                    if (!deferredPrompt) return;
-                    deferredPrompt.prompt();
-                    try { await deferredPrompt.userChoice; } catch (e) {}
-                    deferredPrompt = null;
-                    hideBanner();
+                    await handleInstallPrompt();
                 });
             }
+            installTriggers.forEach((trigger) => {
+                trigger.addEventListener('click', async () => {
+                    await handleInstallPrompt();
+                });
+            });
             if (closeBtn) {
                 closeBtn.addEventListener('click', () => {
                     hideBanner();

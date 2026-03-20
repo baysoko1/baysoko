@@ -185,6 +185,9 @@ def listing_limit_check(view_func):
     """
     @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
+        if not getattr(request, 'user', None) or not request.user.is_authenticated:
+            messages.info(request, "Please log in to create listings.")
+            return redirect(f"{reverse('login')}?next={request.path}")
         store_slug = kwargs.get('slug')
         store = None
         if store_slug:

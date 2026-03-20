@@ -48,6 +48,9 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from urllib.parse import unquote
 
 import requests
+from requests.adapters import HTTPAdapter
+from requests.exceptions import RequestException, SSLError
+from urllib3.util.retry import Retry
 from allauth.socialaccount.models import SocialApp, SocialAccount
 
 from .models import User
@@ -60,6 +63,53 @@ from .forms import (
 from listings.models import Listing
 
 logger = logging.getLogger(__name__)
+
+
+def _build_google_oauth_session():
+    """Create a retrying requests session for Google OAuth endpoints."""
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=0.6,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET", "POST"}),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update({
+        "User-Agent": "BaysokoOAuth/1.0",
+        "Accept": "application/json",
+    })
+    return session
+
+
+def _redirect_after_google_error(request, message=None):
+    """Preserve current flow while surfacing a friendly OAuth error."""
+    action = request.session.get('oauth_action')
+    if action == 'connect' and request.user.is_authenticated:
+        messages.error(
+            request,
+            message or "Google account connection could not be completed. Please retry from your profile page."
+        )
+        return redirect('profile-edit', pk=request.user.pk)
+
+    next_url = _normalize_next_url(request.session.get('post_login_redirect'))
+    if _is_delivery_next(next_url):
+        request.session['delivery_login_intent'] = True
+        messages.error(
+            request,
+            message or "We could not complete Google sign-in for Delivery right now. Please retry from the Delivery login page."
+        )
+        return redirect('delivery:login')
+    messages.error(
+        request,
+        message or "We could not complete Google sign-in for Baysoko Marketplace right now. Please retry from the marketplace sign-in page."
+    )
+    return redirect('register')
 
 def _sync_from_delivery_profile(user):
     """Best-effort sync of missing marketplace profile fields from delivery profile."""
@@ -776,13 +826,13 @@ def google_connect(request):
 def google_callback(request):
     code = request.GET.get('code')
     error = request.GET.get('error')
+    session = _build_google_oauth_session()
 
     if error:
         messages.error(request, f"Google authorization error: {error}")
-        return redirect('register')
+        return _redirect_after_google_error(request, f"Google authorization error: {error}")
     if not code:
-        messages.error(request, "Authorization code not received")
-        return redirect('register')
+        return _redirect_after_google_error(request, "Authorization code not received from Google.")
 
     try:
         app = SocialApp.objects.get(provider='google')
@@ -801,25 +851,22 @@ def google_callback(request):
             'grant_type': 'authorization_code',
             'redirect_uri': redirect_uri,
         }
-        response = requests.post(token_url, data=data, timeout=10)
+        response = session.post(token_url, data=data, timeout=(10, 20))
         if response.status_code != 200:
             logger.error(f"Google token endpoint returned {response.status_code}: {response.text}")
-            messages.error(request, "Failed to get access token from Google")
-            return redirect('register')
+            return _redirect_after_google_error(request)
         token_data = response.json()
 
         if 'access_token' not in token_data:
             logger.error(f"No access_token in token response: {token_data}")
-            messages.error(request, "Failed to get access token from Google")
-            return redirect('register')
+            return _redirect_after_google_error(request)
 
         userinfo_url = 'https://www.googleapis.com/oauth2/v2/userinfo'
         headers = {'Authorization': f"Bearer {token_data['access_token']}"}
-        userinfo_resp = requests.get(userinfo_url, headers=headers, timeout=10)
+        userinfo_resp = session.get(userinfo_url, headers=headers, timeout=(10, 20))
         if userinfo_resp.status_code != 200:
             logger.error(f"Google userinfo returned {userinfo_resp.status_code}: {userinfo_resp.text}")
-            messages.error(request, "Failed to retrieve profile information from Google")
-            return redirect('register')
+            return _redirect_after_google_error(request)
         userinfo = userinfo_resp.json()
 
         email = userinfo.get('email')
@@ -913,10 +960,15 @@ def google_callback(request):
                 return redirect('profile-edit', pk=user.pk)
             return redirect('verification_required')
 
+    except SSLError as e:
+        logger.warning("Google callback SSL error during OAuth exchange: %s", e, exc_info=True)
+        return _redirect_after_google_error(request)
+    except RequestException as e:
+        logger.warning("Google callback network error during OAuth exchange: %s", e, exc_info=True)
+        return _redirect_after_google_error(request)
     except Exception as e:
         logger.error(f"Google callback error: {str(e)}")
-        messages.error(request, "Error during Google login. Please try again.")
-        return redirect('register')
+        return _redirect_after_google_error(request)
 
 def facebook_login(request):
     try:

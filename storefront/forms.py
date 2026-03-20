@@ -49,6 +49,11 @@ def _get_video_duration_seconds(uploaded_file):
                 os.remove(temp_path)
         except Exception:
             pass
+        try:
+            if hasattr(uploaded_file, 'seek'):
+                uploaded_file.seek(0)
+        except Exception:
+            pass
 
 
 # REPLACE the entire UpgradeForm section (from line 79) with this SINGLE, CORRECTED UpgradeForm:
@@ -114,8 +119,20 @@ class MultiFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
 
 
+class MultiFileField(forms.FileField):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('widget', MultiFileInput())
+        super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        single_file_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_file_clean(item, initial) for item in data]
+        return single_file_clean(data, initial)
+
+
 class StoreForm(forms.ModelForm):
-    store_videos = forms.FileField(
+    store_videos = MultiFileField(
         required=False,
         widget=MultiFileInput(attrs={
             'accept': 'video/*',

@@ -56,6 +56,14 @@ class PlanPermissions:
     @classmethod
     def get_user_plan_status(cls, user, store=None):
         """Get user's current plan and status"""
+        if not user or not getattr(user, 'is_authenticated', False):
+            return {
+                'plan': 'free',
+                'status': 'inactive',
+                'subscription': None,
+                'is_active': False,
+                'is_trialing': False,
+            }
         
         # Get active subscription
         subscription = None

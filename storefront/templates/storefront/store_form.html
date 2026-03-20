@@ -233,6 +233,37 @@
         object-fit: cover;
         background: #000;
     }
+    .trim-video-btn,
+    .video-status-badge {
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        right: 8px;
+        padding: 0.3rem 0.5rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-color);
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--text-primary);
+        font-size: 0.7rem;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .video-status-badge {
+        top: 8px;
+        bottom: auto;
+        left: 8px;
+        right: auto;
+        cursor: default;
+        background: rgba(var(--accent-rgb, 6, 214, 160), 0.15);
+        border-color: rgba(var(--accent-rgb, 6, 214, 160), 0.5);
+        color: var(--text-primary);
+    }
+    [data-theme="dark"] .trim-video-btn,
+    [data-theme="dark"] .video-status-badge {
+        background: rgba(16, 16, 16, 0.92);
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
 
     .delivery-map {
         border-radius: 0.5rem;
@@ -525,7 +556,7 @@
                     <div class="upload-card" id="storeVideosUploadArea">
                         <div class="upload-icon"><i class="bi bi-camera-video"></i></div>
                         <div class="upload-title">Add short store videos</div>
-                        <div class="upload-subtitle">Max 45 seconds · 15MB each · up to 3</div>
+                        <div class="upload-subtitle">Max 45 seconds · 15MB each · up to 3 (auto‑trim/compress if needed)</div>
                         <input type="file" name="store_videos" id="id_store_videos" accept="video/*" multiple class="d-none">
                         <button type="button" class="upload-btn" onclick="document.getElementById('id_store_videos').click()">
                             <i class="bi bi-folder2-open"></i> Choose
@@ -687,10 +718,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const storeVideoInput = document.getElementById('id_store_videos');
     const storeVideoPreview = document.getElementById('store-videos-preview');
     const storeVideoErrors = document.getElementById('store-video-errors');
+    const storeSubmitBtn = document.querySelector('#storeForm button[type="submit"]');
     if (storeVideoInput) {
         storeVideoInput.addEventListener('change', function() {
             const files = Array.from(this.files || []);
             let invalid = false;
+            let pendingChecks = 0;
             if (storeVideoErrors) {
                 storeVideoErrors.style.display = 'none';
                 storeVideoErrors.textContent = '';
@@ -703,15 +736,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     storeVideoErrors.style.display = 'block';
                 }
             }
-            files.forEach((file) => {
-                if (!file.type.startsWith('video/')) {
-                    invalid = true;
-                    return;
-                }
-                if (file.size > 15 * 1024 * 1024) {
+
+            files.forEach((file, index) => {
+                if (!(file.type || '').startsWith('video/')) {
                     invalid = true;
                     if (storeVideoErrors) {
-                        storeVideoErrors.textContent = 'Each store video must be 15MB or smaller.';
+                        storeVideoErrors.textContent = 'Only video files are allowed for store videos.';
                         storeVideoErrors.style.display = 'block';
                     }
                     return;
@@ -721,26 +751,57 @@ document.addEventListener('DOMContentLoaded', function() {
                 vid.src = url;
                 vid.muted = true;
                 vid.playsInline = true;
-                vid.addEventListener('loadedmetadata', () => {
-                    if (vid.duration > 45) {
-                        invalid = true;
-                        if (storeVideoErrors) {
-                            storeVideoErrors.textContent = 'Videos must be 45 seconds or shorter.';
-                            storeVideoErrors.style.display = 'block';
-                        }
-                    }
-                });
                 const wrap = document.createElement('div');
                 wrap.className = 'preview-item';
                 wrap.appendChild(vid);
                 const badge = document.createElement('span');
                 badge.className = 'preview-badge';
-                badge.textContent = 'New';
+                badge.textContent = `Video ${index + 1}`;
                 wrap.appendChild(badge);
+                const status = document.createElement('span');
+                status.className = 'video-status-badge';
+                status.textContent = 'Checking';
+                wrap.appendChild(status);
                 if (storeVideoPreview) storeVideoPreview.appendChild(wrap);
+
+                pendingChecks += 1;
+                if (storeSubmitBtn) storeSubmitBtn.disabled = true;
+                vid.addEventListener('loadedmetadata', () => {
+                    const tooLarge = file.size > 15 * 1024 * 1024;
+                    const tooLong = (vid.duration || 0) > 45;
+                    if (tooLarge || tooLong) {
+                        invalid = true;
+                        status.textContent = tooLong ? 'Over 45s' : 'Over 15MB';
+                        status.style.background = 'rgba(220, 53, 69, 0.9)';
+                        if (storeVideoErrors) {
+                            storeVideoErrors.textContent = tooLong
+                                ? 'Each store video must be 45 seconds or shorter.'
+                                : 'Each store video must be 15MB or smaller.';
+                            storeVideoErrors.style.display = 'block';
+                        }
+                    } else {
+                        status.textContent = 'Ready';
+                        status.style.background = 'rgba(6, 214, 160, 0.9)';
+                    }
+                    pendingChecks -= 1;
+                    if (storeSubmitBtn) storeSubmitBtn.disabled = pendingChecks > 0 || invalid;
+                    URL.revokeObjectURL(url);
+                }, { once: true });
+                vid.addEventListener('error', () => {
+                    invalid = true;
+                    status.textContent = 'Unreadable';
+                    status.style.background = 'rgba(220, 53, 69, 0.9)';
+                    if (storeVideoErrors) {
+                        storeVideoErrors.textContent = 'One of the selected videos could not be read.';
+                        storeVideoErrors.style.display = 'block';
+                    }
+                    pendingChecks -= 1;
+                    if (storeSubmitBtn) storeSubmitBtn.disabled = true;
+                    URL.revokeObjectURL(url);
+                }, { once: true });
             });
             if (invalid) {
-                storeVideoInput.value = '';
+                if (storeSubmitBtn) storeSubmitBtn.disabled = true;
             }
         });
     }
@@ -883,9 +944,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try {
             const loc = await window.BaysokoGeo.requestCurrentLocation();
-            const label = await window.BaysokoGeo.reverseGeocode(loc.lat, loc.lng);
-            if (label) {
-                setStoreLocation(loc.lat, loc.lng, label, placeIdInput?.value || "");
+            let label = '';
+            let placeId = '';
+            const resolved = await fetchReverseGeocode(loc.lat, loc.lng);
+            if (resolved?.display_name) label = resolved.display_name;
+            if (resolved?.place_id) placeId = String(resolved.place_id);
+            if (!label) {
+                label = await window.BaysokoGeo.reverseGeocode(loc.lat, loc.lng);
+            }
+            const fallbackLabel = locationInput?.value || '';
+            if (label || fallbackLabel) {
+                setStoreLocation(loc.lat, loc.lng, label || fallbackLabel, placeId || placeIdInput?.value || "");
                 showToast('Using your current location for the store.', 'success');
             }
         } catch (err) {

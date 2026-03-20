@@ -128,6 +128,19 @@ def store_detail(request, slug):
         ).values_list('listing_id', flat=True)
     
     context = {'store': store, 'products': products, 'user_favorites': user_favorites}
+    try:
+        recent_store_reviews = StoreReview.objects.filter(store=store).select_related('reviewer').order_by('-created_at')[:10]
+        context['store_reel_comments_preview'] = [
+            {
+                'author': review.reviewer.get_full_name() or review.reviewer.username,
+                'comment': review.comment,
+                'rating': review.rating,
+                'created_at': review.created_at.isoformat() if review.created_at else '',
+            }
+            for review in recent_store_reviews if getattr(review, 'comment', None)
+        ]
+    except Exception:
+        context['store_reel_comments_preview'] = []
     
     # Add plan-related context for authenticated users
     if request.user.is_authenticated:
@@ -149,7 +162,22 @@ def product_detail(request, store_slug, slug):
             listing__in=Listing.objects.filter(store=store)
         ).values_list('listing_id', flat=True)
 
-    return render(request, 'storefront/product_detail.html', {'store': store, 'product': product, 'user_favorites': user_favorites})
+    context = {'store': store, 'product': product, 'user_favorites': user_favorites}
+    try:
+        reviews = product.reviews.select_related('user').all()
+        context['product_reel_comments_preview'] = [
+            {
+                'author': review.user.get_full_name() or review.user.username,
+                'comment': review.comment,
+                'rating': review.rating,
+                'created_at': review.created_at.isoformat() if review.created_at else '',
+            }
+            for review in reviews if getattr(review, 'comment', None)
+        ]
+    except Exception:
+        context['product_reel_comments_preview'] = []
+
+    return render(request, 'storefront/product_detail.html', context)
 
 @login_required
 def seller_dashboard(request):
@@ -289,15 +317,19 @@ def store_create(request):
                         })
                     start_order = existing_count
                     for idx, video in enumerate(videos):
-                        created_video = StoreVideo.objects.create(
-                            store=store,
-                            video=video,
-                            order=start_order + idx
-                        )
-                        if not _enforce_cloudinary_video_duration(created_video):
-                            messages.error(request, "A store video longer than 45 seconds was removed.")
-                            continue
-                        _broadcast_store_reel_created(created_video)
+                        try:
+                            created_video = StoreVideo.objects.create(
+                                store=store,
+                                video=video,
+                                order=start_order + idx
+                            )
+                            if not _enforce_cloudinary_video_duration(created_video):
+                                messages.error(request, "A store video longer than 45 seconds was removed.")
+                                continue
+                            _broadcast_store_reel_created(created_video)
+                        except Exception as e:
+                            logger.exception('Failed to save store video: %s', e)
+                            messages.error(request, "We couldn't save one of your store videos. Please try again.")
 
                 # Automatically assign Free plan semantics (no DB Subscription required)
                 # Inform user via Django messages, create an in-app notification, and send email.
@@ -359,7 +391,8 @@ def store_create(request):
                     messages.error(request, errors[0])
             else:
                 if errors:
-                    messages.error(request, f"{field.title()}: {errors[0]}")
+                    label = form.fields.get(field).label if field in form.fields and form.fields.get(field).label else field.replace('_', ' ').title()
+                    messages.error(request, f"{label}: {errors[0]}")
 
     else:
         form = StoreForm(user=request.user)
@@ -442,15 +475,19 @@ def store_edit(request, slug):
                         })
                     start_order = existing_count
                     for idx, video in enumerate(videos):
-                        created_video = StoreVideo.objects.create(
-                            store=store,
-                            video=video,
-                            order=start_order + idx
-                        )
-                        if not _enforce_cloudinary_video_duration(created_video):
-                            messages.error(request, "A store video longer than 45 seconds was removed.")
-                            continue
-                        _broadcast_store_reel_created(created_video)
+                        try:
+                            created_video = StoreVideo.objects.create(
+                                store=store,
+                                video=video,
+                                order=start_order + idx
+                            )
+                            if not _enforce_cloudinary_video_duration(created_video):
+                                messages.error(request, "A store video longer than 45 seconds was removed.")
+                                continue
+                            _broadcast_store_reel_created(created_video)
+                        except Exception as e:
+                            logger.exception('Failed to update store video: %s', e)
+                            messages.error(request, "We couldn't save one of the uploaded store videos.")
                 
                 messages.success(request, "Store updated successfully!")
                 return redirect('storefront:store_detail', slug=store.slug)
@@ -478,7 +515,8 @@ def store_edit(request, slug):
             messages.error(request, "Please correct the errors below.")
             for field, errors in form.errors.items():
                 for error in errors:
-                    messages.error(request, f"{field}: {error}")
+                    label = form.fields.get(field).label if field in form.fields and form.fields.get(field).label else field.replace('_', ' ').title()
+                    messages.error(request, f"{label}: {error}")
     
     else:
         # GET request - initialize form with instance

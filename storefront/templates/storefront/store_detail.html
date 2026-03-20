@@ -240,17 +240,287 @@
         -webkit-overflow-scrolling: touch;
     }
     .store-video-card {
-        flex: 0 0 200px;
-        border-radius: 12px;
+        position: relative;
+        flex: 0 0 min(320px, 84vw);
+        min-height: 280px;
+        border-radius: 24px;
         overflow: hidden;
-        border: 1px solid var(--border-color);
-        background: var(--bg-secondary);
+        border: 1px solid rgba(255,255,255,0.08);
+        background: #05070d;
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
     }
     .store-video-card video {
         width: 100%;
-        height: 170px;
+        height: 100%;
         object-fit: cover;
         background: #000;
+    }
+    .video-card-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(10,16,28,0.05) 0%, rgba(10,16,28,0.78) 100%);
+    }
+    .video-badge,
+    .video-card-meta,
+    .video-card-stats {
+        position: absolute;
+        z-index: 2;
+    }
+    .video-badge {
+        top: 12px;
+        left: 12px;
+        padding: 0.45rem 0.75rem;
+        border-radius: 999px;
+        background: rgba(6,214,160,0.16);
+        color: #9cf7df;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .video-card-stats {
+        right: 12px;
+        bottom: 14px;
+        display: grid;
+        gap: 0.55rem;
+    }
+    .video-card-stat {
+        border: 0;
+        border-radius: 999px;
+        background: rgba(8, 12, 20, 0.72);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        width: 38px;
+        height: 38px;
+        justify-content: center;
+        font-size: 0.8rem;
+        position: relative;
+    }
+    .video-card-stat span {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        min-width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #ef476f, #ff7b8a);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 4px;
+        border: 2px solid rgba(8, 12, 20, 0.92);
+    }
+    .video-card-meta {
+        left: 14px;
+        right: 14px;
+        bottom: 14px;
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 0.75rem;
+        color: #fff;
+    }
+    .video-card-label {
+        font-weight: 700;
+        letter-spacing: 0.04em;
+    }
+    .video-card-open {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.6rem 1rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #06d6a0, #14b892);
+        color: #06261e;
+    }
+    .listing-reel-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1300;
+        background: rgba(4, 18, 24, 0.86);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        backdrop-filter: blur(10px);
+    }
+    .listing-reel-modal.show {
+        display: flex;
+    }
+    .listing-reel-shell {
+        width: min(1080px, 100%);
+        max-height: calc(100vh - 40px);
+        display: grid;
+        grid-template-columns: minmax(320px, 520px) minmax(280px, 1fr);
+        background: linear-gradient(145deg, rgba(8, 24, 31, 0.98), rgba(18, 41, 51, 0.95));
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 28px;
+        overflow: hidden;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+    }
+    .listing-reel-media {
+        position: relative;
+        background: #000;
+        min-height: 560px;
+    }
+    .listing-reel-media video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: #000;
+    }
+    .listing-reel-close {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255,255,255,0.14);
+        color: #fff;
+        font-size: 20px;
+        z-index: 2;
+    }
+    .listing-reel-panel {
+        padding: 22px 22px 18px;
+        color: #fff;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+    .listing-reel-kicker {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 11px;
+        color: rgba(255,255,255,0.65);
+    }
+    .listing-reel-title {
+        font-size: 28px;
+        font-weight: 800;
+        line-height: 1.1;
+        margin: 0;
+    }
+    .listing-reel-price {
+        color: #06D6A0;
+        font-size: 18px;
+        font-weight: 700;
+    }
+    .listing-reel-actions {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .listing-reel-action {
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.06);
+        color: #fff;
+        padding: 12px 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        font-weight: 700;
+    }
+    .listing-reel-action.active {
+        background: rgba(239, 71, 111, 0.18);
+        border-color: rgba(239, 71, 111, 0.45);
+        color: #ffd7e0;
+    }
+    .listing-reel-action small {
+        font-size: 12px;
+        color: rgba(255,255,255,0.7);
+    }
+    .listing-reel-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--primary), #ff8c42);
+        padding: 12px 18px;
+        border-radius: 999px;
+        font-weight: 700;
+        text-decoration: none;
+        width: fit-content;
+    }
+    .listing-reel-comments {
+        border-top: 1px solid rgba(255,255,255,0.1);
+        padding-top: 16px;
+    }
+    .listing-reel-comments h4 {
+        font-size: 15px;
+        font-weight: 800;
+        margin-bottom: 12px;
+    }
+    .listing-reel-comment-form {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+    .listing-reel-comment-form textarea {
+        width: 100%;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.05);
+        color: #fff;
+        padding: 12px 14px;
+        resize: vertical;
+    }
+    .listing-reel-comment-submit {
+        justify-self: start;
+        border: none;
+        border-radius: 999px;
+        padding: 10px 16px;
+        background: linear-gradient(135deg, var(--primary), #ff8c42);
+        color: #fff;
+        font-weight: 800;
+    }
+    .listing-reel-comment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .listing-reel-comment {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 12px 14px;
+    }
+    .listing-reel-comment-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 6px;
+        font-size: 12px;
+        color: rgba(255,255,255,0.72);
+    }
+    .listing-reel-comment-body {
+        font-size: 14px;
+        line-height: 1.5;
+        color: rgba(255,255,255,0.94);
+    }
+    .listing-reel-comments-empty {
+        font-size: 13px;
+        color: rgba(255,255,255,0.7);
+        background: rgba(255,255,255,0.04);
+        padding: 14px;
+        border-radius: 14px;
+    }
+    @media (max-width: 991.98px) {
+        .listing-reel-shell {
+            grid-template-columns: 1fr;
+            max-height: calc(100vh - 20px);
+        }
+        .listing-reel-media {
+            min-height: 340px;
+        }
     }
 
     /* ===== PRODUCTS GRID ===== */
@@ -1044,8 +1314,38 @@
         </div>
         <div class="store-video-strip">
             {% for vid in store.videos.all %}
-            <div class="store-video-card">
-                <video src="{{ vid.get_video_url }}" controls playsinline></video>
+            <div class="store-video-card js-store-reel-card"
+                 data-video-id="{{ vid.id }}"
+                 data-kind="store"
+                 data-video-url="{{ vid.get_video_url }}"
+                 data-title="{{ store.name|escape }}"
+                 data-price="Visit Store"
+                 data-link="{% url 'storefront:store_detail' slug=store.slug %}"
+                 data-likes="{{ vid.likes_count|default:0 }}"
+                 data-comments="{{ vid.comments_count|default:0 }}"
+                 data-shares="{{ vid.shares_count|default:0 }}"
+                 data-views="{{ vid.views_count|default:0 }}">
+                <div class="video-card-overlay"></div>
+                <video src="{{ vid.get_video_url }}" playsinline preload="metadata" muted></video>
+                <span class="video-badge">Store Reel {{ forloop.counter }}</span>
+                <div class="video-card-stats">
+                    <button type="button" class="video-card-stat" data-action="like" title="Likes">
+                        <i class="bi bi-heart-fill"></i>
+                        <span>{{ vid.likes_count|default:0 }}</span>
+                    </button>
+                    <button type="button" class="video-card-stat" data-action="comment" title="Comments">
+                        <i class="bi bi-chat-dots-fill"></i>
+                        <span>{{ vid.comments_count|default:0 }}</span>
+                    </button>
+                    <button type="button" class="video-card-stat" data-action="share" title="Shares">
+                        <i class="bi bi-share-fill"></i>
+                        <span>{{ vid.shares_count|default:0 }}</span>
+                    </button>
+                </div>
+                <div class="video-card-meta">
+                    <span class="video-card-label">Open reel</span>
+                    <button type="button" class="video-card-open">Watch</button>
+                </div>
             </div>
             {% endfor %}
         </div>
@@ -1375,6 +1675,58 @@
                         {% endif %}
                     </div>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{{ store_reel_comments_preview|json_script:"storeReelCommentsData" }}
+<div class="listing-reel-modal" id="storeReelModal">
+    <div class="listing-reel-shell">
+        <div class="listing-reel-media">
+            <button type="button" class="listing-reel-close" id="storeReelClose" aria-label="Close">
+                <i class="bi bi-x-lg"></i>
+            </button>
+            <video id="storeReelVideo" controls playsinline></video>
+        </div>
+        <div class="listing-reel-panel">
+            <div>
+                <div class="listing-reel-kicker">Store Reel</div>
+                <h3 class="listing-reel-title" id="storeReelTitle"></h3>
+                <div class="listing-reel-price" id="storeReelPrice"></div>
+            </div>
+            <div class="listing-reel-actions">
+                <button type="button" class="listing-reel-action" id="storeReelLikeBtn">
+                    <i class="bi bi-heart-fill"></i>
+                    <span id="storeReelLikes">0</span>
+                    <small>Likes</small>
+                </button>
+                <button type="button" class="listing-reel-action" id="storeReelCommentBtn">
+                    <i class="bi bi-chat-dots-fill"></i>
+                    <span id="storeReelComments">0</span>
+                    <small>Comments</small>
+                </button>
+                <button type="button" class="listing-reel-action" id="storeReelShareBtn">
+                    <i class="bi bi-share-fill"></i>
+                    <span id="storeReelShares">0</span>
+                    <small>Shares</small>
+                </button>
+                <div class="listing-reel-action">
+                    <i class="bi bi-eye-fill"></i>
+                    <span id="storeReelViews">0</span>
+                    <small>Views</small>
+                </div>
+            </div>
+            <a href="#" class="listing-reel-link" id="storeReelLink">
+                View Store <i class="bi bi-arrow-right"></i>
+            </a>
+            <div class="listing-reel-comments">
+                <h4>Comments</h4>
+                <form class="listing-reel-comment-form" id="storeReelCommentForm">
+                    <textarea id="storeReelCommentInput" rows="3" maxlength="600" placeholder="Write a comment for this reel..."></textarea>
+                    <button type="submit" class="listing-reel-comment-submit">Post Comment</button>
+                </form>
+                <div class="listing-reel-comment-list" id="storeReelCommentList"></div>
             </div>
         </div>
     </div>
@@ -1711,5 +2063,261 @@
             });
         }
     });
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const cards = document.querySelectorAll('.js-store-reel-card');
+    const modal = document.getElementById('storeReelModal');
+    const closeBtn = document.getElementById('storeReelClose');
+    const modalVideo = document.getElementById('storeReelVideo');
+    const modalTitle = document.getElementById('storeReelTitle');
+    const modalPrice = document.getElementById('storeReelPrice');
+    const modalLink = document.getElementById('storeReelLink');
+    const likesEl = document.getElementById('storeReelLikes');
+    const commentsEl = document.getElementById('storeReelComments');
+    const sharesEl = document.getElementById('storeReelShares');
+    const viewsEl = document.getElementById('storeReelViews');
+    const likeBtn = document.getElementById('storeReelLikeBtn');
+    const commentBtn = document.getElementById('storeReelCommentBtn');
+    const shareBtn = document.getElementById('storeReelShareBtn');
+    const commentsList = document.getElementById('storeReelCommentList');
+    const commentForm = document.getElementById('storeReelCommentForm');
+    const commentInput = document.getElementById('storeReelCommentInput');
+    const commentsData = (() => {
+        try {
+            return JSON.parse(document.getElementById('storeReelCommentsData')?.textContent || '[]');
+        } catch (e) {
+            return [];
+        }
+    })();
+    if (!cards.length || !modal || !modalVideo) return;
+
+    const getCookie = (name) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    };
+    const csrfToken = getCookie('csrftoken');
+    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    let activeCard = null;
+    let activeVideoId = null;
+    let activeKind = 'store';
+    const esc = (value) => String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    function getCard(videoId, kind) {
+        return document.querySelector(`.js-store-reel-card[data-video-id="${videoId}"][data-kind="${kind || 'store'}"]`);
+    }
+
+    function renderComments(items = commentsData) {
+        if (!commentsList) return;
+        if (!items.length) {
+            commentsList.innerHTML = '<div class="listing-reel-comments-empty">No written store comments yet. Use the reviews section to add the first one.</div>';
+            return;
+        }
+        commentsList.innerHTML = items.map((item) => `
+            <div class="listing-reel-comment">
+                <div class="listing-reel-comment-header">
+                    <strong>${esc(item.author || 'Anonymous')}</strong>
+                    <span>${'★'.repeat(Math.max(0, Number(item.rating || 0)))}</span>
+                </div>
+                <div class="listing-reel-comment-body">${esc(item.comment || '')}</div>
+            </div>
+        `).join('');
+    }
+
+    function fetchComments() {
+        if (!activeVideoId) return Promise.resolve();
+        return fetch(`/listings/reels/${activeKind}/${activeVideoId}/comments/`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => {
+            if (!data || !data.success) return;
+            renderComments(data.comments || []);
+            applyCounts(data);
+            if (likeBtn) likeBtn.classList.toggle('active', !!data.liked);
+        })
+        .catch(() => {});
+    }
+
+    function syncCardCounts(card, counts) {
+        if (!card) return;
+        card.dataset.likes = counts.likes_count;
+        card.dataset.comments = counts.comments_count;
+        card.dataset.shares = counts.shares_count;
+        card.dataset.views = counts.views_count;
+        const buttonMap = { like: counts.likes_count, comment: counts.comments_count, share: counts.shares_count };
+        Object.entries(buttonMap).forEach(([action, value]) => {
+            const countEl = card.querySelector(`.video-card-stat[data-action="${action}"] span`);
+            if (countEl && value !== undefined) countEl.textContent = value;
+        });
+    }
+
+    function applyCounts(counts) {
+        if (likesEl && counts.likes_count !== undefined) likesEl.textContent = counts.likes_count;
+        if (commentsEl && counts.comments_count !== undefined) commentsEl.textContent = counts.comments_count;
+        if (sharesEl && counts.shares_count !== undefined) sharesEl.textContent = counts.shares_count;
+        if (viewsEl && counts.views_count !== undefined) viewsEl.textContent = counts.views_count;
+        syncCardCounts(activeCard, counts);
+    }
+
+    function sendAction(action) {
+        if (!activeVideoId) return Promise.resolve();
+        return fetch(`/listings/reels/${activeKind}/${activeVideoId}/${action}/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        }).then((res) => res.ok ? res.json() : null)
+        .then((data) => {
+            if (data && data.success) applyCounts(data);
+            return data;
+        }).catch(() => null);
+    }
+
+    function openModal(card) {
+        activeCard = card;
+        activeVideoId = card.dataset.videoId;
+        activeKind = card.dataset.kind || 'store';
+        if (modalTitle) modalTitle.textContent = card.dataset.title || '';
+        if (modalPrice) modalPrice.textContent = card.dataset.price || '';
+        if (modalLink) modalLink.href = card.dataset.link || '#';
+        modalVideo.src = card.dataset.videoUrl || '';
+        modalVideo.play().catch(() => {});
+        applyCounts({
+            likes_count: card.dataset.likes || 0,
+            comments_count: card.dataset.comments || 0,
+            shares_count: card.dataset.shares || 0,
+            views_count: card.dataset.views || 0
+        });
+        renderComments();
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        sendAction('view');
+        fetchComments();
+    }
+
+    function closeModal() {
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
+        modalVideo.pause();
+        modalVideo.removeAttribute('src');
+        modalVideo.load();
+    }
+
+    cards.forEach((card) => {
+        card.addEventListener('click', (e) => {
+            const statBtn = e.target.closest('.video-card-stat');
+            if (statBtn) {
+                e.preventDefault();
+                const action = statBtn.dataset.action;
+                activeCard = card;
+                activeVideoId = card.dataset.videoId;
+                activeKind = card.dataset.kind || 'store';
+                if (action === 'comment') {
+                    openModal(card);
+                    fetchComments().then(() => {
+                        const commentsSection = document.querySelector('.listing-reel-comments');
+                        if (commentsSection) commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    });
+                    return;
+                }
+                sendAction(action).then((data) => {
+                    if (action === 'like' && likeBtn) {
+                        likeBtn.classList.toggle('active', !!data?.liked);
+                    }
+                    if (action === 'share') {
+                        const shareUrl = card.dataset.link || window.location.href;
+                        if (navigator.share) {
+                            navigator.share({ title: card.dataset.title || 'Baysoko Store Reel', url: shareUrl }).catch(() => {});
+                        } else if (navigator.clipboard) {
+                            navigator.clipboard.writeText(shareUrl).then(() => showToast('Link copied to clipboard', 'success')).catch(() => {});
+                        }
+                    }
+                });
+                return;
+            }
+            openModal(card);
+        });
+    });
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('show')) closeModal();
+    });
+
+    if (likeBtn) likeBtn.addEventListener('click', () => {
+        sendAction('like').then((data) => {
+            likeBtn.classList.toggle('active', !!data?.liked);
+        });
+    });
+    if (commentBtn) commentBtn.addEventListener('click', () => {
+        fetchComments().then(() => {
+            const commentsSection = document.querySelector('.listing-reel-comments');
+            if (commentsSection) commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+    if (shareBtn) shareBtn.addEventListener('click', () => {
+        const shareUrl = modalLink?.href || window.location.href;
+        sendAction('share');
+        if (navigator.share) {
+            navigator.share({ title: modalTitle?.textContent || 'Baysoko Store Reel', url: shareUrl }).catch(() => {});
+        } else if (navigator.clipboard) {
+            navigator.clipboard.writeText(shareUrl).then(() => showToast('Link copied to clipboard', 'success')).catch(() => {});
+        }
+    });
+    if (commentForm) {
+        commentForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const comment = (commentInput?.value || '').trim();
+            if (!comment || !activeVideoId) return;
+            fetch(`/listings/reels/${activeKind}/${activeVideoId}/comments/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-Reel-Comment': comment
+                },
+                body: new URLSearchParams({ comment })
+            })
+            .then((res) => res.ok ? res.json() : res.json().then((data) => Promise.reject(data)))
+            .then((data) => {
+                if (commentInput) commentInput.value = '';
+                applyCounts(data);
+                fetchComments();
+                if (window.showToast) window.showToast('Comment posted.', 'success');
+            })
+            .catch((error) => {
+                if (window.showToast) window.showToast(error?.error || 'Unable to post comment.', 'error');
+            });
+        });
+    }
+
+    try {
+        const reelsWs = new WebSocket(`${wsProto}://${window.location.host}/ws/reels/`);
+        reelsWs.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type !== 'reel_update' || !message.payload) return;
+                const payload = message.payload;
+                const card = getCard(payload.video_id, payload.kind || 'store');
+                syncCardCounts(card, payload);
+                if (String(activeVideoId) === String(payload.video_id) && activeKind === (payload.kind || 'store')) {
+                    applyCounts(payload);
+                }
+            } catch (error) {}
+        };
+    } catch (error) {}
+});
 </script>
 {% endblock %}

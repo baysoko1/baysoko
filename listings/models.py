@@ -118,6 +118,27 @@ class ListingVideo(models.Model):
                 if hasattr(self.video, 'url'):
                     return self.video.url
         return ''
+
+
+class ListingVideoLike(models.Model):
+    video = models.ForeignKey('ListingVideo', on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='listing_video_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['video', 'user']
+        ordering = ['-created_at']
+
+
+class ListingVideoComment(models.Model):
+    video = models.ForeignKey('ListingVideo', on_delete=models.CASCADE, related_name='reel_comments')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='listing_video_comments')
+    comment = models.TextField(max_length=600)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
     
     
 class Listing(models.Model):

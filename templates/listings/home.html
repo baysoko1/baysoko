@@ -32,7 +32,9 @@
     .carousel-item-1,
     .carousel-item-2,
     .carousel-item-3,
-    .carousel-item-4 {
+    .carousel-item-4,
+    .carousel-item-5,
+    .carousel-item-6 {
     background-size: cover;
     background-repeat: no-repeat;
     background-position: center;
@@ -43,7 +45,9 @@
     .carousel-item-1::before,
     .carousel-item-2::before,
     .carousel-item-3::before,
-    .carousel-item-4::before {
+    .carousel-item-4::before,
+    .carousel-item-5::before,
+    .carousel-item-6::before {
     content: "";
     position: absolute;
     top: 0;
@@ -58,7 +62,9 @@
     .carousel-item-1 > *,
     .carousel-item-2 > *,
     .carousel-item-3 > *,
-    .carousel-item-4 > * {
+    .carousel-item-4 > *,
+    .carousel-item-5 > *,
+    .carousel-item-6 > * {
     position: relative;
     z-index: 2;
     }
@@ -82,6 +88,16 @@
     .carousel-item-4 {
     background-image: url('https://imgs.search.brave.com/6XeI4npHtOgyY51j6pqun9W-0D1F6RDrZKTK2kpVBcE/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9tZWRp/YS5pc3RvY2twaG90/by5jb20vaWQvMTQ1/OTE1MDUzMy9waG90/by9saWZlLWluLWtl/bnlhLW1vbWJhc2Et/MjAxOC5qcGc_cz02/MTJ4NjEyJnc9MCZr/PTIwJmM9SVBfNjJ6/MTFzWGdtSS1wa0pp/c1hlU09fTUxBU24y/YlVwc3hxQV9VaFNZ/bz0');
     background-color: var(--accent);
+    }
+
+    .carousel-item-5 {
+    background-image: url('https://media.istockphoto.com/id/1473801282/photo/an-unrecognizable-businessman-working-on-his-computer.jpg?s=612x612&w=0&k=20&c=PGERjHzq5zuC_f70suYrYTclUmacgvbIv31klhaaNYw=');
+    background-color: #06d6a0;
+    }
+
+    .carousel-item-6 {
+    background-image: url('https://orangeapronmedia.com/wp-content/uploads/2025/03/AdobeStock_672286151-720x345.jpeg');
+    background-color: #ffd166;
     }
 
     .hero-content {
@@ -340,17 +356,82 @@
         padding: var(--spacing-xl) 0;
     }
     .reels-track {
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(280px, 340px);
         gap: var(--spacing-lg);
-        max-height: 70vh;
-        overflow-y: auto;
-        scroll-snap-type: y mandatory;
-        padding: 0 var(--spacing-md);
+        overflow-x: auto;
+        overflow-y: hidden;
+        scroll-snap-type: x mandatory;
+        padding: 0 var(--spacing-md) 8px;
         -webkit-overflow-scrolling: touch;
+        align-items: stretch;
+    }
+    .reels-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .reels-scroll-area {
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .reels-scroll-hint {
+        position: absolute;
+        top: -0.55rem;
+        right: 0.85rem;
+        z-index: 3;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.46rem 0.8rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, rgba(6, 214, 160, 0.2), rgba(10, 15, 25, 0.96));
+        border: 1px solid rgba(6, 214, 160, 0.26);
+        color: var(--text-primary);
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+        pointer-events: none;
+        transition: opacity 0.28s ease, transform 0.28s ease;
+    }
+    .reels-scroll-hint.hidden {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    .reels-scroll-hint i {
+        color: #7ef0cd;
+        animation: reelsHintNudge 1.6s ease-in-out infinite;
+    }
+    @keyframes reelsHintNudge {
+        0%, 100% { transform: translateX(0); }
+        40% { transform: translateX(6px); }
+        75% { transform: translateX(-2px); }
+    }
+        .reels-scroll-btn {
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        border: 1px solid var(--border-color);
+        background: rgba(255,255,255,0.06);
+        color: var(--text-primary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        box-shadow: var(--shadow-md);
+        transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+    .reels-scroll-btn:hover {
+        transform: translateY(-2px);
+        background: rgba(6, 214, 160, 0.16);
+        border-color: rgba(6, 214, 160, 0.45);
     }
     .reel-card {
-        width: min(420px, 100%);
+        width: 100%;
         background: var(--card-bg);
         border-radius: 20px;
         overflow: hidden;
@@ -398,13 +479,32 @@
         transition: transform 0.2s ease, background 0.2s ease;
     }
     .reel-action-btn.active {
-        background: rgba(255, 107, 53, 0.95);
+        background: rgba(239, 71, 111, 0.95);
+        color: #fff;
+        box-shadow: 0 8px 22px rgba(239, 71, 111, 0.35);
         transform: scale(1.05);
     }
+    .reel-action-btn.reel-like.active {
+        background: rgba(255, 92, 122, 0.16);
+        border: 1px solid rgba(255, 92, 122, 0.5);
+        color: #ff5c7a;
+    }
+    .reel-action-btn.reel-like.active i {
+        color: #ff5c7a;
+        filter: drop-shadow(0 0 10px rgba(255, 92, 122, 0.28));
+    }
     .reel-action-count {
-        font-size: 0.75rem;
-        color: rgba(255,255,255,0.9);
+        font-size: 0.78rem;
+        color: rgba(255,255,255,0.96);
         text-align: center;
+        background: rgba(8, 12, 20, 0.62);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 999px;
+        padding: 3px 8px;
+        min-width: 36px;
+        display: inline-flex;
+        justify-content: center;
+        margin-top: 2px;
     }
     .reel-meta {
         display: grid;
@@ -434,12 +534,13 @@
     .reel-modal {
         position: fixed;
         inset: 0;
-        background: rgba(0,0,0,0.75);
+        background: rgba(4, 18, 24, 0.86);
         display: none;
         align-items: center;
         justify-content: center;
         z-index: 2000;
         padding: 20px;
+        backdrop-filter: blur(10px);
     }
     .reel-modal.show {
         display: flex;
@@ -477,6 +578,231 @@
         padding: 14px 16px 18px;
         display: grid;
         gap: 6px;
+    }
+    .listing-reel-shell {
+        width: min(1080px, 100%);
+        max-height: calc(100vh - 40px);
+        display: grid;
+        grid-template-columns: minmax(320px, 520px) minmax(280px, 1fr);
+        background: linear-gradient(145deg, rgba(8, 24, 31, 0.98), rgba(18, 41, 51, 0.95));
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 28px;
+        overflow: hidden;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+    }
+    .listing-reel-media {
+        position: relative;
+        background: #000;
+        min-height: 560px;
+    }
+    .listing-reel-media video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: #000;
+    }
+    .listing-reel-close {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255,255,255,0.14);
+        color: #fff;
+        font-size: 20px;
+        z-index: 3;
+    }
+    .listing-reel-panel {
+        padding: 22px 22px 18px;
+        color: #fff;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+    .listing-reel-kicker {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 11px;
+        color: rgba(255,255,255,0.65);
+    }
+    .listing-reel-title {
+        font-size: 28px;
+        font-weight: 800;
+        line-height: 1.1;
+        margin: 0;
+    }
+    .listing-reel-price {
+        color: #06D6A0;
+        font-size: 18px;
+        font-weight: 700;
+    }
+    .listing-reel-actions {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .listing-reel-action {
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.06);
+        color: #fff;
+        padding: 12px 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        font-weight: 700;
+        transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+    button.listing-reel-action:hover,
+    button.listing-reel-action.active,
+    .listing-reel-action.active {
+        background: rgba(239, 71, 111, 0.18);
+        border-color: rgba(239, 71, 111, 0.45);
+        color: #ffd7e0;
+        transform: translateY(-2px);
+    }
+    #reelModalLikeBtn.active {
+        background: rgba(239, 71, 111, 0.18);
+        border-color: rgba(239, 71, 111, 0.45);
+        color: #ffd7e0;
+    }
+    #reelModalLikeBtn.active i,
+    #reelModalLikeBtn.active span {
+        color: inherit;
+    }
+    .listing-reel-action i {
+        font-size: 1.1rem;
+        color: #7ef0cd;
+    }
+    .listing-reel-action span {
+        font-size: 1.1rem;
+        font-weight: 800;
+    }
+    .listing-reel-action small {
+        font-size: 12px;
+        color: rgba(255,255,255,0.7);
+    }
+    .listing-reel-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--primary), #ff8c42);
+        padding: 12px 18px;
+        border-radius: 999px;
+        font-weight: 700;
+        text-decoration: none;
+        width: fit-content;
+    }
+    .listing-reel-comments {
+        border-top: 1px solid rgba(255,255,255,0.1);
+        padding-top: 16px;
+    }
+    .listing-reel-comments h4 {
+        font-size: 15px;
+        font-weight: 800;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+    }
+    .listing-reel-comment-form {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+    .listing-reel-comment-form textarea {
+        width: 100%;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.05);
+        color: #fff;
+        padding: 12px 14px;
+        resize: vertical;
+    }
+    .listing-reel-comment-submit {
+        justify-self: start;
+        border: none;
+        border-radius: 999px;
+        padding: 10px 16px;
+        background: linear-gradient(135deg, var(--primary), #ff8c42);
+        color: #fff;
+        font-weight: 800;
+    }
+    .listing-reel-comment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .listing-reel-comment {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 12px 14px;
+    }
+    .listing-reel-comment-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 6px;
+        font-size: 12px;
+        color: rgba(255,255,255,0.72);
+    }
+    .listing-reel-comment-body {
+        font-size: 14px;
+        line-height: 1.5;
+        color: rgba(255,255,255,0.94);
+    }
+    .listing-reel-comments-empty {
+        font-size: 13px;
+        color: rgba(255,255,255,0.7);
+        background: rgba(255,255,255,0.04);
+        padding: 14px;
+        border-radius: 14px;
+    }
+    @media (max-width: 991.98px) {
+        .listing-reel-shell {
+            grid-template-columns: 1fr;
+            max-height: calc(100vh - 20px);
+        }
+        .listing-reel-media {
+            min-height: 320px;
+        }
+        .listing-reel-media video {
+            height: 100%;
+        }
+    }
+    @media (max-width: 575.98px) {
+        .reels-track {
+            grid-auto-columns: minmax(84vw, 84vw);
+            padding-inline: 0;
+        }
+        .reels-scroll-hint {
+            top: auto;
+            bottom: -0.3rem;
+            right: 0.25rem;
+            font-size: 0.72rem;
+            padding: 0.38rem 0.68rem;
+        }
+        .reels-scroll-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 38px;
+            height: 38px;
+            z-index: 4;
+            background: rgba(8, 18, 27, 0.82);
+            border-color: rgba(255,255,255,0.14);
+            backdrop-filter: blur(10px);
+        }
+        #reelsScrollLeft { left: 0.2rem; }
+        #reelsScrollRight { right: 0.2rem; }
+        .reel-modal {
+            padding: 0.5rem;
+        }
     }
 
     .scroll-button {
@@ -2887,6 +3213,8 @@
         <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="1" aria-label="Slide 2"></button>
         <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="2" aria-label="Slide 3"></button>
         <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="3" aria-label="Slide 4"></button>
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="4" aria-label="Slide 5"></button>
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="5" aria-label="Slide 6"></button>
     </div>
     <div class="carousel-inner">
         <!-- Slide 1 -->
@@ -3051,6 +3379,76 @@
                     <a href="{% url 'all-listings' %}" class="btn-custom btn-secondary">
                         <i class="bi bi-chat"></i>
                         Message Sellers
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 5 -->
+        <div class="carousel-item carousel-item-5">
+            <div class="floating-shapes">
+                <div class="shape shape-1 floating"></div>
+                <div class="shape shape-2 floating"></div>
+                <div class="shape shape-3 floating"></div>
+            </div>
+            <div class="hero-content">
+                <div class="hero-badge">
+                    <i class="bi bi-cash-coin"></i>
+                    <span>Baysoko Affiliates</span>
+                </div>
+
+                <h1 class="hero-title">
+                    Earn From Every Referral You Send
+                </h1>
+
+                <p class="hero-subtitle">
+                    Share your Baysoko affiliate link, track clicks and commissions in real time, and grow a steady side income from the marketplace.
+                </p>
+
+                <div class="hero-actions">
+                    <a href="{% url 'affiliates:dashboard' %}" class="btn-custom btn-primary">
+                        <i class="bi bi-graph-up-arrow"></i>
+                        Affiliate Dashboard
+                    </a>
+
+                    <a href="{% url 'affiliates:terms' %}" class="btn-custom btn-secondary">
+                        <i class="bi bi-link-45deg"></i>
+                        Learn More
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 6 -->
+        <div class="carousel-item carousel-item-6">
+            <div class="floating-shapes">
+                <div class="shape shape-1 floating"></div>
+                <div class="shape shape-2 floating"></div>
+                <div class="shape shape-3 floating"></div>
+            </div>
+            <div class="hero-content">
+                <div class="hero-badge">
+                    <i class="bi bi-phone"></i>
+                    <span>Install Baysoko</span>
+                </div>
+
+                <h1 class="hero-title">
+                    Keep Baysoko One Tap Away
+                </h1>
+
+                <p class="hero-subtitle">
+                    Install the Baysoko app for faster browsing, smarter notifications, and a smoother buying and selling experience from any device.
+                </p>
+
+                <div class="hero-actions">
+                    <button type="button" class="btn-custom btn-primary" data-pwa-install-trigger>
+                        <i class="bi bi-download"></i>
+                        Install App
+                    </button>
+
+                    <a href="{% url 'all-listings' %}" class="btn-custom btn-secondary">
+                        <i class="bi bi-compass"></i>
+                        Keep Exploring
                     </a>
                 </div>
             </div>
@@ -3976,9 +4374,28 @@
             <h2 class="section-title">Baysoko Reels</h2>
             <p class="section-subtitle">Quick video tours from sellers</p>
         </div>
-        <div class="reels-track" id="reelsTrack">
+        <div class="reels-row">
+            <button type="button" class="reels-scroll-btn" id="reelsScrollLeft" aria-label="Scroll reels left">
+                <i class="bi bi-chevron-left"></i>
+            </button>
+            <div class="reels-scroll-area">
+            <div class="reels-scroll-hint" id="reelsScrollHint">
+                <span>Scroll for more reels</span>
+                <i class="bi bi-arrow-right"></i>
+            </div>
+            <div class="reels-track" id="reelsTrack">
             {% for reel in reel_items %}
-            <div class="reel-card" data-video-id="{{ reel.video_id }}" data-kind="{{ reel.kind }}">
+            <div class="reel-card"
+                 data-video-id="{{ reel.video_id }}"
+                 data-kind="{{ reel.kind }}"
+                 data-title="{{ reel.title|truncatechars:40|escape }}"
+                 data-price="{% if reel.price %}KSh {{ reel.price|intcomma }}{% else %}Visit Store{% endif %}"
+                 data-link="{{ reel.url }}"
+                 data-video-url="{{ reel.video_url }}"
+                 data-likes="{{ reel.likes_count|default:0 }}"
+                 data-comments="{{ reel.comments_count|default:0 }}"
+                 data-shares="{{ reel.shares_count|default:0 }}"
+                 data-views="{{ reel.views_count|default:0 }}">
                 <video class="reel-video" src="{{ reel.video_url }}" muted playsinline preload="metadata"></video>
                 <div class="reel-actions">
                     <div class="text-center">
@@ -4018,22 +4435,65 @@
                 </div>
             </div>
             {% endfor %}
+            </div>
+            </div>
+            <button type="button" class="reels-scroll-btn" id="reelsScrollRight" aria-label="Scroll reels right">
+                <i class="bi bi-chevron-right"></i>
+            </button>
         </div>
     </div>
 </section>
 {% endif %}
 
 <div class="reel-modal" id="reelModal">
-    <div class="reel-modal-content">
-        <button class="reel-modal-close" id="reelModalClose"><i class="bi bi-x"></i></button>
-        <video id="reelModalVideo" controls playsinline></video>
-        <div class="reel-modal-meta">
-            <div class="reel-title" id="reelModalTitle"></div>
-            <div class="reel-price" id="reelModalPrice"></div>
-            <a class="reel-link" id="reelModalLink" href="#">
+    <div class="listing-reel-shell reel-modal-content">
+        <div class="listing-reel-media">
+            <button class="reel-modal-close listing-reel-close" id="reelModalClose"><i class="bi bi-x"></i></button>
+            <video id="reelModalVideo" controls playsinline></video>
+        </div>
+        <div class="listing-reel-panel reel-modal-meta">
+            <div>
+                <div class="listing-reel-kicker">Baysoko Reels</div>
+                <div class="reel-title listing-reel-title" id="reelModalTitle"></div>
+                <div class="reel-price listing-reel-price" id="reelModalPrice"></div>
+            </div>
+            <div class="listing-reel-actions">
+                <button type="button" class="listing-reel-action" id="reelModalLikeBtn" data-action="like">
+                    <i class="bi bi-heart-fill"></i>
+                    <span id="reelModalLikes">0</span>
+                    <small>Likes</small>
+                </button>
+                <button type="button" class="listing-reel-action" id="reelModalCommentBtn" data-action="comment">
+                    <i class="bi bi-chat-dots-fill"></i>
+                    <span id="reelModalComments">0</span>
+                    <small>Comments</small>
+                </button>
+                <button type="button" class="listing-reel-action" id="reelModalShareBtn" data-action="share">
+                    <i class="bi bi-share-fill"></i>
+                    <span id="reelModalShares">0</span>
+                    <small>Shares</small>
+                </button>
+                <div class="listing-reel-action">
+                    <i class="bi bi-eye-fill"></i>
+                    <span id="reelModalViews">0</span>
+                    <small>Views</small>
+                </div>
+            </div>
+            <a class="reel-link listing-reel-link" id="reelModalLink" href="#">
                 View Listing <i class="bi bi-arrow-right"></i>
             </a>
+            <div class="listing-reel-comments">
+                <h4>Comments</h4>
+                <form class="listing-reel-comment-form" id="reelModalCommentForm">
+                    <textarea id="reelModalCommentInput" rows="3" maxlength="600" placeholder="Write a comment for this reel..."></textarea>
+                    <button type="submit" class="listing-reel-comment-submit">Post Comment</button>
+                </form>
+                <div class="listing-reel-comment-list" id="reelModalCommentList">
+                    <div class="listing-reel-comments-empty">Open the listing or store page to join the conversation.</div>
+                </div>
+            </div>
         </div>
+
     </div>
 </div>
 
@@ -4240,8 +4700,8 @@
             <p class="app-subtitle">Shop faster, get notifications, and manage your store on the go.</p>
         </div>
         <div class="app-buttons">
-            <a href="#" class="app-button"><i class="bi bi-google-play"></i> Google Play</a>
-            <a href="#" class="app-button"><i class="bi bi-apple"></i> App Store</a>
+            <button type="button" class="app-button" data-pwa-install-trigger><i class="bi bi-phone"></i> Install App</button>
+            <a href="{% url 'all-listings' %}" class="app-button"><i class="bi bi-compass"></i> Browse Marketplace</a>
         </div>
     </div>
 </section>
@@ -5311,6 +5771,9 @@
 
         // ===== REELS INTERACTIONS =====
         const reelsTrack = document.getElementById('reelsTrack');
+        const reelsScrollLeft = document.getElementById('reelsScrollLeft');
+        const reelsScrollRight = document.getElementById('reelsScrollRight');
+        const reelsScrollHint = document.getElementById('reelsScrollHint');
         const getCookie = (name) => {
             const value = `; ${document.cookie}`;
             const parts = value.split(`; ${name}=`);
@@ -5319,6 +5782,36 @@
         };
 
         if (reelsTrack) {
+            let reelsHintDismissed = false;
+            let reelsHintTimer = null;
+            const hideReelsHint = () => {
+                if (!reelsScrollHint || reelsHintDismissed) return;
+                reelsHintDismissed = true;
+                reelsScrollHint.classList.add('hidden');
+                window.setTimeout(() => reelsScrollHint.remove(), 320);
+            };
+            if (reelsScrollHint) {
+                reelsHintTimer = window.setTimeout(hideReelsHint, 5200);
+                reelsTrack.addEventListener('scroll', () => {
+                    if (Math.abs(reelsTrack.scrollLeft) > 10) hideReelsHint();
+                }, { passive: true });
+                reelsTrack.addEventListener('pointerdown', hideReelsHint, { passive: true });
+                reelsTrack.addEventListener('touchstart', hideReelsHint, { passive: true });
+            }
+            if (reelsScrollLeft) {
+                reelsScrollLeft.addEventListener('click', () => {
+                    if (reelsHintTimer) clearTimeout(reelsHintTimer);
+                    hideReelsHint();
+                    reelsTrack.scrollBy({ left: -360, behavior: 'smooth' });
+                });
+            }
+            if (reelsScrollRight) {
+                reelsScrollRight.addEventListener('click', () => {
+                    if (reelsHintTimer) clearTimeout(reelsHintTimer);
+                    hideReelsHint();
+                    reelsTrack.scrollBy({ left: 360, behavior: 'smooth' });
+                });
+            }
             const csrfToken = getCookie('csrftoken');
             let viewObserver;
             const reelModal = document.getElementById('reelModal');
@@ -5327,9 +5820,32 @@
             const reelModalTitle = document.getElementById('reelModalTitle');
             const reelModalPrice = document.getElementById('reelModalPrice');
             const reelModalLink = document.getElementById('reelModalLink');
+            const reelModalLikes = document.getElementById('reelModalLikes');
+            const reelModalComments = document.getElementById('reelModalComments');
+            const reelModalShares = document.getElementById('reelModalShares');
+            const reelModalViews = document.getElementById('reelModalViews');
+            const reelModalLikeBtn = document.getElementById('reelModalLikeBtn');
+            const reelModalCommentBtn = document.getElementById('reelModalCommentBtn');
+            const reelModalShareBtn = document.getElementById('reelModalShareBtn');
+            const reelModalCommentList = document.getElementById('reelModalCommentList');
+            const reelModalCommentForm = document.getElementById('reelModalCommentForm');
+            const reelModalCommentInput = document.getElementById('reelModalCommentInput');
+            let activeReelCard = null;
+            let activeReelVideoId = null;
+            let activeReelKind = 'listing';
+            const esc = (value) => String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
 
-            function updateReelCounts(videoId, data) {
-                const card = reelsTrack.querySelector(`.reel-card[data-video-id="${videoId}"]`);
+            function getReelCard(videoId, kind) {
+                return reelsTrack.querySelector(`.reel-card[data-video-id="${videoId}"][data-kind="${kind || 'listing'}"]`);
+            }
+
+            function updateReelCounts(videoId, data, kind) {
+                const card = getReelCard(videoId, kind || data.kind);
                 if (!card) return;
                 const likes = card.querySelector('[data-count="likes"]');
                 const comments = card.querySelector('[data-count="comments"]');
@@ -5340,6 +5856,16 @@
                 if (shares && data.shares_count !== undefined) shares.textContent = data.shares_count;
                 if (views && data.views_count !== undefined) {
                     views.innerHTML = `<i class="bi bi-eye me-1"></i>${data.views_count} views`;
+                }
+                card.dataset.likes = data.likes_count ?? card.dataset.likes;
+                card.dataset.comments = data.comments_count ?? card.dataset.comments;
+                card.dataset.shares = data.shares_count ?? card.dataset.shares;
+                card.dataset.views = data.views_count ?? card.dataset.views;
+                if (String(activeReelVideoId) === String(videoId) && activeReelKind === (kind || data.kind || 'listing')) {
+                    if (reelModalLikes && data.likes_count !== undefined) reelModalLikes.textContent = data.likes_count;
+                    if (reelModalComments && data.comments_count !== undefined) reelModalComments.textContent = data.comments_count;
+                    if (reelModalShares && data.shares_count !== undefined) reelModalShares.textContent = data.shares_count;
+                    if (reelModalViews && data.views_count !== undefined) reelModalViews.textContent = data.views_count;
                 }
             }
 
@@ -5352,25 +5878,82 @@
                         'X-Requested-With': 'XMLHttpRequest'
                     }
                 }).then(res => res.ok ? res.json() : null).then(data => {
-                    if (data && data.success) updateReelCounts(videoId, data);
+                    if (data && data.success) updateReelCounts(videoId, data, reelKind);
+                    return data;
                 }).catch(() => {});
+            }
+
+            function renderModalComments(items, kind) {
+                if (!reelModalCommentList) return;
+                if (!items || !items.length) {
+                    const linkLabel = kind === 'store' ? 'store page' : 'listing page';
+                    reelModalCommentList.innerHTML = `
+                        <div class="listing-reel-comments-empty">
+                            No reel comments yet. Be the first, or visit the ${linkLabel} for more context.
+                        </div>
+                    `;
+                    return;
+                }
+                reelModalCommentList.innerHTML = items.map((item) => `
+                    <div class="listing-reel-comment">
+                        <div class="listing-reel-comment-header">
+                            <strong>${esc(item.author || 'Anonymous')}</strong>
+                            <span>${item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}</span>
+                        </div>
+                        <div class="listing-reel-comment-body">${esc(item.comment || '')}</div>
+                    </div>
+                `).join('');
+            }
+
+            function fetchReelComments() {
+                if (!activeReelVideoId) return Promise.resolve();
+                return fetch(`/listings/reels/${activeReelKind}/${activeReelVideoId}/comments/`, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then((res) => res.ok ? res.json() : null)
+                .then((data) => {
+                    if (!data || !data.success) return;
+                    renderModalComments(data.comments || [], activeReelKind);
+                    updateReelCounts(activeReelVideoId, data, activeReelKind);
+                    if (reelModalLikeBtn) {
+                        reelModalLikeBtn.classList.toggle('active', !!data.liked);
+                    }
+                })
+                .catch(() => {});
+            }
+
+            function openReelModal(card) {
+                const video = card.querySelector('.reel-video');
+                const title = card.dataset.title || card.querySelector('.reel-title')?.textContent || '';
+                const price = card.dataset.price || card.querySelector('.reel-price')?.textContent || '';
+                const link = card.dataset.link || card.querySelector('.reel-link')?.getAttribute('href') || '#';
+                activeReelCard = card;
+                activeReelVideoId = card.getAttribute('data-video-id');
+                activeReelKind = card.getAttribute('data-kind') || 'listing';
+
+                if (reelModal && reelModalVideo && video) {
+                    reelModalVideo.src = card.dataset.videoUrl || video.currentSrc || video.src;
+                    reelModalVideo.play().catch(() => {});
+                    if (reelModalTitle) reelModalTitle.textContent = title;
+                    if (reelModalPrice) reelModalPrice.textContent = price;
+                    if (reelModalLink) {
+                        reelModalLink.href = link;
+                        reelModalLink.innerHTML = `${activeReelKind === 'store' ? 'View Store' : 'View Listing'} <i class="bi bi-arrow-right"></i>`;
+                    }
+                    if (reelModalLikes) reelModalLikes.textContent = card.dataset.likes || 0;
+                    if (reelModalComments) reelModalComments.textContent = card.dataset.comments || 0;
+                    if (reelModalShares) reelModalShares.textContent = card.dataset.shares || 0;
+                    if (reelModalViews) reelModalViews.textContent = card.dataset.views || 0;
+                    renderModalComments([], activeReelKind);
+                    reelModal.classList.add('show');
+                    fetchReelComments();
+                }
             }
 
             function wireReelCard(card) {
                 card.addEventListener('click', (e) => {
                     if (e.target.closest('.reel-action-btn')) return;
-                    const video = card.querySelector('.reel-video');
-                    const title = card.querySelector('.reel-title');
-                    const price = card.querySelector('.reel-price');
-                    const link = card.querySelector('.reel-link');
-                    if (reelModal && reelModalVideo && video) {
-                        reelModalVideo.src = video.currentSrc || video.src;
-                        reelModalVideo.play().catch(() => {});
-                        if (reelModalTitle && title) reelModalTitle.textContent = title.textContent || '';
-                        if (reelModalPrice && price) reelModalPrice.textContent = price.textContent || '';
-                        if (reelModalLink && link) reelModalLink.href = link.getAttribute('href') || '#';
-                        reelModal.classList.add('show');
-                    }
+                    openReelModal(card);
                 });
 
                 const buttons = card.querySelectorAll('.reel-action-btn');
@@ -5383,23 +5966,28 @@
                         if (!videoId || !action) return;
 
                         if (action === 'like') {
-                            btn.classList.toggle('active');
-                            sendReelAction(videoId, 'like', kind);
+                            sendReelAction(videoId, 'like', kind).then((data) => {
+                                btn.classList.toggle('active', !!data?.liked);
+                                if (reelModalLikeBtn && String(activeReelVideoId) === String(videoId)) {
+                                    reelModalLikeBtn.classList.toggle('active', !!data?.liked);
+                                }
+                            });
                             return;
                         }
 
                         if (action === 'comment') {
-                            const link = card.querySelector('.reel-link');
-                            sendReelAction(videoId, 'comment', kind);
-                            if (link) {
-                                window.location.href = link.getAttribute('href') + '#reviews';
-                            }
+                            openReelModal(card);
+                            fetchReelComments().then(() => {
+                                const commentsSection = document.querySelector('.listing-reel-comments');
+                                if (commentsSection) {
+                                    commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }
+                            });
                             return;
                         }
 
                         if (action === 'share') {
-                            const link = card.querySelector('.reel-link');
-                            const url = link ? link.getAttribute('href') : window.location.href;
+                            const url = card.dataset.link || card.querySelector('.reel-link')?.getAttribute('href') || window.location.href;
                             sendReelAction(videoId, 'share', kind);
                             if (navigator.share) {
                                 navigator.share({ title: 'Baysoko Listing', url: url }).catch(() => {});
@@ -5422,6 +6010,14 @@
                 card.className = 'reel-card';
                 card.setAttribute('data-video-id', payload.video_id);
                 card.setAttribute('data-kind', payload.kind || 'listing');
+                card.dataset.title = payload.listing_title || payload.store_name || 'New reel';
+                card.dataset.price = payload.listing_price ? `KSh ${payload.listing_price}` : 'Visit Store';
+                card.dataset.link = payload.listing_url || payload.url || '#';
+                card.dataset.videoUrl = payload.video_url || '';
+                card.dataset.likes = payload.likes_count || 0;
+                card.dataset.comments = payload.comments_count || 0;
+                card.dataset.shares = payload.shares_count || 0;
+                card.dataset.views = payload.views_count || 0;
                 card.innerHTML = `
                     <video class="reel-video" src="${payload.video_url}" muted playsinline preload="metadata"></video>
                     <div class="reel-actions">
@@ -5468,7 +6064,7 @@
                     try {
                         const msg = JSON.parse(evt.data);
                         if (msg.type === 'reel_update') {
-                            updateReelCounts(msg.payload.video_id, msg.payload);
+                            updateReelCounts(msg.payload.video_id, msg.payload, msg.payload.kind);
                         }
                         if (msg.type === 'reel_created' && msg.payload) {
                             const card = buildReelCard(msg.payload);
@@ -5505,11 +6101,71 @@
                         reelModalVideo.pause();
                         reelModalVideo.src = '';
                     }
+                    activeReelCard = null;
+                    activeReelVideoId = null;
                 });
                 reelModal.addEventListener('click', (e) => {
                     if (e.target === reelModal) {
                         reelModalClose.click();
                     }
+                });
+            }
+
+            if (reelModalLikeBtn) {
+                reelModalLikeBtn.addEventListener('click', () => {
+                    if (!activeReelVideoId) return;
+                    sendReelAction(activeReelVideoId, 'like', activeReelKind).then((data) => {
+                        reelModalLikeBtn.classList.toggle('active', !!data?.liked);
+                    });
+                });
+            }
+            if (reelModalCommentBtn) {
+                reelModalCommentBtn.addEventListener('click', () => {
+                    if (!activeReelVideoId) return;
+                    fetchReelComments().then(() => {
+                        const commentsSection = document.querySelector('.listing-reel-comments');
+                        if (commentsSection) {
+                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    });
+                });
+            }
+            if (reelModalShareBtn) {
+                reelModalShareBtn.addEventListener('click', () => {
+                    if (!activeReelVideoId) return;
+                    const shareUrl = reelModalLink?.href || window.location.href;
+                    sendReelAction(activeReelVideoId, 'share', activeReelKind);
+                    if (navigator.share) {
+                        navigator.share({ title: reelModalTitle?.textContent || 'Baysoko Reel', url: shareUrl }).catch(() => {});
+                    } else if (navigator.clipboard) {
+                        navigator.clipboard.writeText(shareUrl).then(() => showToast('Link copied to clipboard', 'success')).catch(() => {});
+                    }
+                });
+            }
+            if (reelModalCommentForm) {
+                reelModalCommentForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const comment = (reelModalCommentInput?.value || '').trim();
+                    if (!comment || !activeReelVideoId) return;
+                    fetch(`/listings/reels/${activeReelKind}/${activeReelVideoId}/comments/`, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-Reel-Comment': comment
+                        },
+                        body: new URLSearchParams({ comment })
+                    })
+                    .then((res) => res.ok ? res.json() : res.json().then((data) => Promise.reject(data)))
+                    .then((data) => {
+                        if (reelModalCommentInput) reelModalCommentInput.value = '';
+                        updateReelCounts(activeReelVideoId, data, activeReelKind);
+                        fetchReelComments();
+                        showToast('Comment posted.', 'success');
+                    })
+                    .catch((error) => {
+                        showToast(error?.error || 'Unable to post comment.', 'error');
+                    });
                 });
             }
         }
