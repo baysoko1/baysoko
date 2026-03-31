@@ -2,6 +2,7 @@
 from django.core.management.base import BaseCommand
 from django.contrib.sites.models import Site
 from allauth.socialaccount.models import SocialApp
+from django.conf import settings
 import os
 
 class Command(BaseCommand):
@@ -9,10 +10,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write("⚙️  Configuring OAuth settings...")
+
+        site_url = (getattr(settings, 'SITE_URL', '') or os.environ.get('SITE_URL') or 'https://baysoko.up.railway.app').strip().rstrip('/')
+        site_domain = site_url.replace('https://', '').replace('http://', '').strip('/')
         
         # 1. Configure the Site
         site = Site.objects.get_current()
-        site.domain = 'bay-soko.onrender.com'
+        site.domain = site_domain
         site.name = 'Baysoko Marketplace'
         site.save()
         
@@ -31,10 +35,10 @@ class Command(BaseCommand):
         self.stdout.write("\n📋 Redirect URIs to configure in provider dashboards:")
         self.stdout.write("-" * 50)
         self.stdout.write("Google OAuth Console:")
-        self.stdout.write(f"  Redirect URI: https://bay-soko.onrender.com/accounts/google/callback/")
+        self.stdout.write(f"  Redirect URI: {site_url}/accounts/google/callback/")
         self.stdout.write("")
         self.stdout.write("Facebook Developer Console:")
-        self.stdout.write(f"  Redirect URI: https://bay-soko.onrender.com/accounts/facebook/callback/")
+        self.stdout.write(f"  Redirect URI: {site_url}/accounts/facebook/callback/")
         
         self.stdout.write("\n💡 Tip: Make sure these URIs are EXACTLY as shown above.")
         

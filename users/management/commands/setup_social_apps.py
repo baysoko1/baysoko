@@ -10,12 +10,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write("🚀 Setting up OAuth for production...")
+        site_url = (getattr(settings, 'SITE_URL', '') or os.environ.get('SITE_URL') or 'https://baysoko.up.railway.app').strip().rstrip('/')
+        site_domain = site_url.replace('https://', '').replace('http://', '').strip('/')
         
         # Get or create the site
         site, created = Site.objects.get_or_create(
             id=1,
             defaults={
-                'domain': 'bay-soko.onrender.com',
+                'domain': site_domain,
                 'name': 'Baysoko Marketplace'
             }
         )
@@ -23,7 +25,7 @@ class Command(BaseCommand):
         if created:
             self.stdout.write(f"✅ Created new site: {site.name}")
         else:
-            site.domain = 'bay-soko.onrender.com'
+            site.domain = site_domain
             site.name = 'Baysoko Marketplace'
             site.save()
             self.stdout.write(f"✅ Updated site: {site.name}")
@@ -79,11 +81,11 @@ class Command(BaseCommand):
         
         self.stdout.write("\n✅ OAuth setup complete!")
         self.stdout.write(f"🌐 Site Domain: {site.domain}")
-        self.stdout.write(f"🔗 Google Callback: https://bay-soko.onrender.com/accounts/google/callback/")
-        self.stdout.write(f"🔗 Facebook Callback: https://bay-soko.onrender.com/accounts/facebook/callback/")
+        self.stdout.write(f"🔗 Google Callback: {site_url}/accounts/google/callback/")
+        self.stdout.write(f"🔗 Facebook Callback: {site_url}/accounts/facebook/callback/")
         
         # Display the actual redirect URIs that will be used
         self.stdout.write("\n📋 Google OAuth Configuration in Google Console:")
-        self.stdout.write(f"Authorized redirect URI: https://bay-soko.onrender.com/accounts/google/callback/")
+        self.stdout.write(f"Authorized redirect URI: {site_url}/accounts/google/callback/")
         self.stdout.write("\n📋 Facebook OAuth Configuration in Facebook Developer:")
-        self.stdout.write(f"Valid OAuth Redirect URIs: https://bay-soko.onrender.com/accounts/facebook/callback/")
+        self.stdout.write(f"Valid OAuth Redirect URIs: {site_url}/accounts/facebook/callback/")
