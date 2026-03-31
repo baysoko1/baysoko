@@ -590,7 +590,7 @@ def _get_assistant_gemini_models():
     except Exception:
         pass
     try:
-        for m in (getattr(settings, 'GEMINI_CANDIDATE_MODELS', None) or []):
+        for m in (getattr(settings, 'BAYSOKO_ASSISTANT_GEMINI_CANDIDATES', None) or []):
             if m and m not in models:
                 models.append(m)
     except Exception:

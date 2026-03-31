@@ -336,12 +336,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Google Gemini configuration
 # Prefer explicit env var `GEMINI_API_KEY` but fall back to `GOOGLE_API_KEY` if present
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or config('GEMINI_API_KEY', default='')
-# Pin a stable model to avoid runtime probing. Set via env `GEMINI_MODEL` to override.
-# Default model: prefer a known-supported Gemini variant for REST fallbacks.
-# Override via the GEMINI_MODEL environment variable if you have a different model.
+# Pin a single stable model by default to avoid runtime probing across unavailable models.
 GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-3.1-flash-lite-preview')
-# When pinned, candidate probing will use only the pinned model to avoid extra requests
-GEMINI_CANDIDATE_MODELS = ['gemini-3.1-flash-lite-preview', 'gemini-3.1-pro-preview','gemini-2.5-flash','gemini-1.5-pro']
+_gemini_candidates_raw = config('GEMINI_CANDIDATE_MODELS', default=GEMINI_MODEL)
+GEMINI_CANDIDATE_MODELS = [m.strip() for m in str(_gemini_candidates_raw).split(',') if m.strip()] or [GEMINI_MODEL]
+BAYSOKO_ASSISTANT_GEMINI_MODEL = config('BAYSOKO_ASSISTANT_GEMINI_MODEL', default=GEMINI_MODEL)
+_assistant_candidates_raw = config('BAYSOKO_ASSISTANT_GEMINI_CANDIDATES', default=BAYSOKO_ASSISTANT_GEMINI_MODEL)
+BAYSOKO_ASSISTANT_GEMINI_CANDIDATES = [
+    m.strip() for m in str(_assistant_candidates_raw).split(',') if m.strip()
+] or [BAYSOKO_ASSISTANT_GEMINI_MODEL]
 
 # Channels (WebSocket) configuration - in-memory layer for development
 ASGI_APPLICATION = 'baysoko.asgi.application'
