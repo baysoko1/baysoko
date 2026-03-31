@@ -14,8 +14,12 @@ if python manage.py migrate --noinput; then
     echo "-> collectstatic command unavailable; continuing with WhiteNoise finder-based static serving"
   fi
 
-  echo "-> Configuring OAuth providers"
-  python manage.py configure_oauth
+  echo "-> Configuring OAuth providers if supported"
+  if python manage.py help configure_oauth >/dev/null 2>&1; then
+    python manage.py configure_oauth
+  else
+    echo "-> configure_oauth command unavailable; continuing because runtime OAuth callback uses SITE_URL directly"
+  fi
 
   if [ -n "${DJANGO_SUPERUSER_EMAIL:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
     echo "-> Ensuring Django superuser exists"
