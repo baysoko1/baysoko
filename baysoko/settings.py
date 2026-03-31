@@ -371,11 +371,10 @@ from django.core.exceptions import ImproperlyConfigured
 # Handle SECRET_KEY for production
 if not DEBUG:
     if SECRET_KEY.startswith('django-insecure') or len(SECRET_KEY) < 50:
-        # Generate a strong key for production if not set
-        from django.core.management.utils import get_random_secret_key
-        SECRET_KEY = get_random_secret_key()
-        print("⚠️  Generated strong SECRET_KEY for production")
-        print(f"⚠️  Set a fixed SECRET_KEY environment variable for persistence")
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be explicitly set in production. "
+            "Set a strong fixed SECRET_KEY environment variable on Railway."
+        )
 
 # If running in development and SECRET_KEY is weak, generate a stable random one
 # and persist it to a local file so it survives process reloads (avoids session corruption)

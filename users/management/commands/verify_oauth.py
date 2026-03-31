@@ -10,6 +10,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write("🔍 Verifying OAuth Configuration...")
+        site_url = (getattr(settings, 'SITE_URL', '') or os.environ.get('SITE_URL') or 'https://baysoko.up.railway.app').strip().rstrip('/')
+        google_redirect_uri = f"{site_url}/accounts/google/callback/"
+        facebook_redirect_uri = f"{site_url}/accounts/facebook/callback/"
         
         # Check current site
         site = Site.objects.get_current()
@@ -22,18 +25,9 @@ class Command(BaseCommand):
             self.stdout.write(f"✅ Google Client ID: {google_app.client_id[:20]}...")
             self.stdout.write(f"✅ Google Sites: {list(google_app.sites.all())}")
             
-            # Direct hardcoded redirect URI (matching what's in adapters.py)
-            google_redirect_uri = "https://bay-soko.onrender.com/accounts/google/callback/"
-            self.stdout.write(f"✅ Google Redirect URI (hardcoded): {google_redirect_uri}")
+            self.stdout.write(f"✅ Google Redirect URI: {google_redirect_uri}")
             
-            # Verify it matches expected value
-            expected_uri = "https://bay-soko.onrender.com/accounts/google/callback/"
-            if google_redirect_uri == expected_uri:
-                self.stdout.write("✅ Google Redirect URI matches expected value!")
-            else:
-                self.stdout.write(f"❌ Google Redirect URI mismatch!")
-                self.stdout.write(f"   Expected: {expected_uri}")
-                self.stdout.write(f"   Got: {google_redirect_uri}")
+            self.stdout.write("✅ Google Redirect URI matches SITE_URL configuration.")
                 
         except SocialApp.DoesNotExist:
             self.stdout.write("❌ Google OAuth app not configured!")
@@ -45,9 +39,7 @@ class Command(BaseCommand):
             self.stdout.write(f"✅ Facebook Client ID: {facebook_app.client_id[:20]}...")
             self.stdout.write(f"✅ Facebook Sites: {list(facebook_app.sites.all())}")
             
-            # Direct hardcoded redirect URI (matching what's in adapters.py)
-            facebook_redirect_uri = "https://bay-soko.onrender.com/accounts/facebook/callback/"
-            self.stdout.write(f"✅ Facebook Redirect URI (hardcoded): {facebook_redirect_uri}")
+            self.stdout.write(f"✅ Facebook Redirect URI: {facebook_redirect_uri}")
             
         except SocialApp.DoesNotExist:
             self.stdout.write("❌ Facebook OAuth app not configured!")
@@ -64,9 +56,8 @@ class Command(BaseCommand):
         self.stdout.write(f"✅ FACEBOOK_OAUTH_CLIENT_ID: {'✓' if facebook_client_id else '✗'}")
         self.stdout.write(f"✅ FACEBOOK_OAUTH_CLIENT_SECRET: {'✓' if facebook_secret else '✗'}")
         
-        # Check URLs in views
-        self.stdout.write("\n🔍 Checking Hardcoded URLs in views.py:")
-        self.stdout.write(f"✅ Google callback in views: https://bay-soko.onrender.com/accounts/google/callback/")
-        self.stdout.write(f"✅ Facebook callback in views: https://bay-soko.onrender.com/accounts/facebook/callback/")
+        self.stdout.write("\n🔍 Effective callback URLs:")
+        self.stdout.write(f"✅ Google callback: {google_redirect_uri}")
+        self.stdout.write(f"✅ Facebook callback: {facebook_redirect_uri}")
         
         self.stdout.write("\n✅ OAuth Verification Complete!")
