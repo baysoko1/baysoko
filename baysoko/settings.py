@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import os
 import sys
 from decouple import config, Csv
 import cloudinary
@@ -702,7 +703,6 @@ LOGGING = {
 }
 
 # Ensure logs directory exists
-import os
 os.makedirs('logs', exist_ok=True)
 # Additional security settings
 X_FRAME_OPTIONS = 'DENY'
@@ -762,17 +762,40 @@ if 'manage.py' in ' '.join(sys.argv) or 'migrate' in sys.argv:
         
         # Emergency override if engine is wrong
         if DATABASES.get('default', {}).get('ENGINE') == 'django.db.backends.dummy':
-            print("🚨 EMERGENCY: Dummy backend detected, forcing PostgreSQL")
-            DATABASES = {
-                'default': {
-                    'ENGINE': 'django.db.backends.postgresql',
-                    'NAME': 'baysoko2',
-                    'USER': 'baysoko2_user',
-                    'PASSWORD': 'Da8a4VMjdk7X0QOuJtBxtZs3Q4ym7VzG',
-                    'HOST': 'dpg-d5gd8m7pm1nc73e44la0-a',
-                    'PORT': '5432',
-                }
-            }
+            print("🚨 EMERGENCY: Dummy backend detected, reparsing DATABASE_URL")
+            try:
+                db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+                db_config['ENGINE'] = 'django.db.backends.postgresql'
+                if 'OPTIONS' in db_config:
+                    db_config['OPTIONS'].pop('sslmode', None)
+                    db_config['OPTIONS'].pop('ssl', None)
+                DATABASES = {'default': db_config}
+                print("✅ DATABASE_URL reparsed successfully for management command")
+            except Exception as db_err:
+                print(f"❌ Failed to reparse DATABASE_URL: {db_err}")
+                raise ImproperlyConfigured(
+                    "DATABASE_URL is set but could not be parsed into a valid PostgreSQL configuration."
+                )
+
+# Final safety net: never allow a dummy backend to survive into runtime.
+if DATABASES.get('default', {}).get('ENGINE') == 'django.db.backends.dummy':
+    if DATABASE_URL and DATABASE_URL.strip():
+        try:
+            db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+            db_config['ENGINE'] = 'django.db.backends.postgresql'
+            if 'OPTIONS' in db_config:
+                db_config['OPTIONS'].pop('sslmode', None)
+                db_config['OPTIONS'].pop('ssl', None)
+            DATABASES = {'default': db_config}
+            print("✅ Final DATABASE_URL reparse cleared dummy backend")
+        except Exception as db_err:
+            raise ImproperlyConfigured(
+                f"settings.DATABASES resolved to dummy backend and DATABASE_URL reparsing failed: {db_err}"
+            )
+    else:
+        raise ImproperlyConfigured(
+            "settings.DATABASES resolved to dummy backend and no DATABASE_URL is configured."
+        )
 
 # Final debug output
 print("=" * 50)
