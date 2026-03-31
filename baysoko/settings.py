@@ -45,17 +45,24 @@ if DATABASE_URL and DATABASE_URL.strip():
     try:
         # Parse the DATABASE_URL
         import dj_database_url
-        db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-        
-        # CRITICAL: Make sure ENGINE is explicitly set
-        db_config['ENGINE'] = 'django.db.backends.postgresql'
-        
-        # Remove any problematic SSL options
-        if 'OPTIONS' in db_config:
-            db_config['OPTIONS'].pop('sslmode', None)
-            db_config['OPTIONS'].pop('ssl', None)
-        
-        # Set the DATABASES dict
+        parsed_db = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+
+        db_config = {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': parsed_db.get('NAME', ''),
+            'USER': parsed_db.get('USER', ''),
+            'PASSWORD': parsed_db.get('PASSWORD', ''),
+            'HOST': parsed_db.get('HOST', ''),
+            'PORT': str(parsed_db.get('PORT', '') or ''),
+            'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
+        }
+
+        options = dict(parsed_db.get('OPTIONS') or {})
+        options.pop('sslmode', None)
+        options.pop('ssl', None)
+        if options:
+            db_config['OPTIONS'] = options
+
         DATABASES = {
             'default': db_config
         }
@@ -764,11 +771,21 @@ if 'manage.py' in ' '.join(sys.argv) or 'migrate' in sys.argv:
         if DATABASES.get('default', {}).get('ENGINE') == 'django.db.backends.dummy':
             print("🚨 EMERGENCY: Dummy backend detected, reparsing DATABASE_URL")
             try:
-                db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-                db_config['ENGINE'] = 'django.db.backends.postgresql'
-                if 'OPTIONS' in db_config:
-                    db_config['OPTIONS'].pop('sslmode', None)
-                    db_config['OPTIONS'].pop('ssl', None)
+                parsed_db = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+                db_config = {
+                    'ENGINE': 'django.db.backends.postgresql',
+                    'NAME': parsed_db.get('NAME', ''),
+                    'USER': parsed_db.get('USER', ''),
+                    'PASSWORD': parsed_db.get('PASSWORD', ''),
+                    'HOST': parsed_db.get('HOST', ''),
+                    'PORT': str(parsed_db.get('PORT', '') or ''),
+                    'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
+                }
+                options = dict(parsed_db.get('OPTIONS') or {})
+                options.pop('sslmode', None)
+                options.pop('ssl', None)
+                if options:
+                    db_config['OPTIONS'] = options
                 DATABASES = {'default': db_config}
                 print("✅ DATABASE_URL reparsed successfully for management command")
             except Exception as db_err:
@@ -781,11 +798,21 @@ if 'manage.py' in ' '.join(sys.argv) or 'migrate' in sys.argv:
 if DATABASES.get('default', {}).get('ENGINE') == 'django.db.backends.dummy':
     if DATABASE_URL and DATABASE_URL.strip():
         try:
-            db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-            db_config['ENGINE'] = 'django.db.backends.postgresql'
-            if 'OPTIONS' in db_config:
-                db_config['OPTIONS'].pop('sslmode', None)
-                db_config['OPTIONS'].pop('ssl', None)
+            parsed_db = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+            db_config = {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': parsed_db.get('NAME', ''),
+                'USER': parsed_db.get('USER', ''),
+                'PASSWORD': parsed_db.get('PASSWORD', ''),
+                'HOST': parsed_db.get('HOST', ''),
+                'PORT': str(parsed_db.get('PORT', '') or ''),
+                'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
+            }
+            options = dict(parsed_db.get('OPTIONS') or {})
+            options.pop('sslmode', None)
+            options.pop('ssl', None)
+            if options:
+                db_config['OPTIONS'] = options
             DATABASES = {'default': db_config}
             print("✅ Final DATABASE_URL reparse cleared dummy backend")
         except Exception as db_err:
