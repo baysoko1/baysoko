@@ -3,9 +3,6 @@ from pathlib import Path
 import os
 import sys
 from decouple import config, Csv
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
 import dj_database_url
 from decimal import Decimal
 import redis
@@ -135,6 +132,10 @@ CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cas
 
 # Only configure Cloudinary if credentials are provided
 if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+    import cloudinary
+    import cloudinary.uploader
+    import cloudinary.api
+
     CLOUDINARY_STORAGE = {
         'CLOUD_NAME': CLOUDINARY_CLOUD_NAME,
         'API_KEY': CLOUDINARY_API_KEY,
