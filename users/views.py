@@ -111,6 +111,27 @@ def _redirect_after_google_error(request, message=None):
     )
     return redirect('register')
 
+
+def _get_social_callback_base_url(request=None):
+    site_url = (getattr(settings, 'SITE_URL', '') or os.environ.get('SITE_URL', '')).strip().rstrip('/')
+    if site_url:
+        return site_url
+
+    if request is not None:
+        scheme = 'http' if settings.DEBUG else 'https'
+        return f"{scheme}://{request.get_host()}"
+
+    try:
+        current_site = Site.objects.get_current()
+        scheme = 'http' if settings.DEBUG else 'https'
+        return f"{scheme}://{current_site.domain}"
+    except Exception:
+        return 'http://localhost:8000' if settings.DEBUG else 'https://baysoko.up.railway.app'
+
+
+def _get_social_callback_uri(provider, request=None):
+    return f"{_get_social_callback_base_url(request)}/accounts/{provider}/callback/"
+
 def _sync_from_delivery_profile(user):
     """Best-effort sync of missing marketplace profile fields from delivery profile."""
     try:
@@ -734,12 +755,7 @@ def verification_required(request):
 
 def google_login(request):
     try:
-        current_site = Site.objects.get_current()
-        redirect_uri = (
-            f"http://{request.get_host()}/accounts/google/callback/"
-            if settings.DEBUG
-            else f"https://{current_site.domain}/accounts/google/callback/"
-        )
+        redirect_uri = _get_social_callback_uri('google', request)
 
         try:
             app = SocialApp.objects.get(provider='google')
@@ -784,12 +800,7 @@ def google_connect(request):
         return redirect('login')
 
     try:
-        current_site = Site.objects.get_current()
-        redirect_uri = (
-            f"http://{request.get_host()}/accounts/google/callback/"
-            if settings.DEBUG
-            else f"https://{current_site.domain}/accounts/google/callback/"
-        )
+        redirect_uri = _get_social_callback_uri('google', request)
 
         try:
             app = SocialApp.objects.get(provider='google')
@@ -836,12 +847,7 @@ def google_callback(request):
 
     try:
         app = SocialApp.objects.get(provider='google')
-        current_site = Site.objects.get_current()
-        redirect_uri = (
-            f"http://{request.get_host()}/accounts/google/callback/"
-            if settings.DEBUG
-            else f"https://{current_site.domain}/accounts/google/callback/"
-        )
+        redirect_uri = _get_social_callback_uri('google', request)
 
         token_url = 'https://oauth2.googleapis.com/token'
         data = {

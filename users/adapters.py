@@ -7,6 +7,12 @@ import os
 from django.conf import settings
 
 class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
+    def _base_site_url(self):
+        site_url = (getattr(settings, 'SITE_URL', '') or os.environ.get('SITE_URL', '')).strip().rstrip('/')
+        if site_url:
+            return site_url
+        return 'http://localhost:8000' if getattr(settings, 'DEBUG', False) else 'https://baysoko.up.railway.app'
+
     def get_app(self, request, provider, client_id=None):
         """
         Override to handle social apps gracefully
@@ -98,18 +104,5 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
     def get_redirect_uri(self, request, provider):
         """
         Get the correct redirect URI for social authentication
-        Hardcoded to use render.com URL
         """
-        # For Google, use hardcoded render.com URL
-        if provider == 'google':
-            # Hardcoded Render.com URL
-            return "https://bay-soko.onrender.com/accounts/google/callback/"
-        
-        # For Facebook
-        if provider == 'facebook':
-            # Hardcoded Render.com URL
-            return "https://bay-soko.onrender.com/accounts/facebook/callback/"
-        
-        # Fallback - return the default allauth behavior for other providers
-        # Note: DefaultSocialAccountAdapter doesn't have get_redirect_uri, so we return a default
-        return f"https://bay-soko.onrender.com/accounts/{provider}/callback/"
+        return f"{self._base_site_url()}/accounts/{provider}/callback/"

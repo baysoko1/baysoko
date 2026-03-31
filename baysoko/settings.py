@@ -474,7 +474,7 @@ else:
 SITE_ID = 1
 SITE_URL = config(
     'SITE_URL',
-    default=('http://localhost:8000' if DEBUG else 'https://bay-soko.onrender.com')
+    default=('http://localhost:8000' if DEBUG else 'https://baysoko.up.railway.app')
 )
 
 # If running on localhost over HTTP, ensure session/CSRF cookies are not secure-only.
@@ -656,22 +656,32 @@ ECOMMERCE_PLATFORMS = [
 ]
 
 # Email configuration
+if not BREVO_API_KEY:
+    BREVO_API_KEY = os.environ.get('SENDINBLUE_API_KEY') or os.environ.get('SIB_API_KEY') or ''
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend')
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_HOST = config('EMAIL_HOST', default='smtp-relay.brevo.com')
 EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=30, cast=int)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='00peteromondi@gmail.com')
+if not BREVO_SENDER_EMAIL:
+    BREVO_SENDER_EMAIL = os.environ.get('EMAIL_HOST_USER') or '00peteromondi@10654604.brevosend.com'
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=BREVO_SENDER_EMAIL)
+SERVER_EMAIL = config('SERVER_EMAIL', default=DEFAULT_FROM_EMAIL)
+EMAIL_FROM_NAME = config('EMAIL_FROM_NAME', default='Baysoko')
 
 # Debug email configuration
 print(f"📧 EMAIL_BACKEND: {EMAIL_BACKEND}")
 print(f"📧 EMAIL_HOST: {EMAIL_HOST}")
 print(f"📧 EMAIL_PORT: {EMAIL_PORT}")
 print(f"📧 EMAIL_USE_TLS: {EMAIL_USE_TLS}")
+print(f"📧 EMAIL_USE_SSL: {EMAIL_USE_SSL}")
 print(f"📧 EMAIL_HOST_USER: {'SET' if EMAIL_HOST_USER else 'NOT SET'}")
 print(f"📧 EMAIL_HOST_PASSWORD: {'SET' if EMAIL_HOST_PASSWORD else 'NOT SET'}")
 print(f"📧 DEFAULT_FROM_EMAIL: {DEFAULT_FROM_EMAIL}")
+print(f"📧 BREVO_API_KEY: {'SET' if BREVO_API_KEY else 'NOT SET'}")
 print(f"📧 DEBUG: {DEBUG}")
 
 # Password reset timeout in seconds
@@ -869,7 +879,6 @@ try:
             print(f"⚠️  Could not probe Redis server at {REDIS_URL}: {e}; using InMemoryChannelLayer")
     elif not (DEBUG or RUNNING_RUNSERVER):
         print("ℹ️  No REDIS_URL configured for this environment; using LocMem cache and InMemoryChannelLayer.")
-
     if use_redis_channel:
         CHANNEL_LAYERS = {
             "default": {
