@@ -9,6 +9,7 @@ import cloudinary.api
 import dj_database_url
 from decimal import Decimal
 import redis
+from django.core.exceptions import ImproperlyConfigured
 
 
 # Check if we're running migrations - if so, delay some settings
@@ -23,69 +24,54 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ================================================
 # DATABASE CONFIGURATION - FIXED VERSION
 # ================================================
+DATABASE_URL = (os.environ.get('DATABASE_URL') or '').strip()
 
-# Default configuration - ALWAYS set this at module level
-DATABASES = {
-    'default': {
+
+def _sqlite_database_config():
+    return {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
-}
 
-# Handle PostgreSQL if DATABASE_URL exists
-DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# Debug: Print what we're working with
+def _postgres_database_config(database_url: str):
+    parsed_db = dj_database_url.parse(database_url, conn_max_age=600)
+    db_config = {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': parsed_db.get('NAME') or '',
+        'USER': parsed_db.get('USER') or '',
+        'PASSWORD': parsed_db.get('PASSWORD') or '',
+        'HOST': parsed_db.get('HOST') or '',
+        'PORT': str(parsed_db.get('PORT') or ''),
+        'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
+    }
+    options = dict(parsed_db.get('OPTIONS') or {})
+    options.pop('sslmode', None)
+    options.pop('ssl', None)
+    if options:
+        db_config['OPTIONS'] = options
+    return db_config
+
+
 print(f"🔍 DATABASE_URL found: {bool(DATABASE_URL)}")
 if DATABASE_URL:
     print(f"🔍 DATABASE_URL length: {len(DATABASE_URL)}")
     print(f"🔍 DATABASE_URL first 50 chars: {DATABASE_URL[:50]}...")
 
-if DATABASE_URL and DATABASE_URL.strip():
-    try:
-        # Parse the DATABASE_URL
-        import dj_database_url
-        parsed_db = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-
-        db_config = {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': parsed_db.get('NAME', ''),
-            'USER': parsed_db.get('USER', ''),
-            'PASSWORD': parsed_db.get('PASSWORD', ''),
-            'HOST': parsed_db.get('HOST', ''),
-            'PORT': str(parsed_db.get('PORT', '') or ''),
-            'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
-        }
-
-        options = dict(parsed_db.get('OPTIONS') or {})
-        options.pop('sslmode', None)
-        options.pop('ssl', None)
-        if options:
-            db_config['OPTIONS'] = options
-
-        DATABASES = {
-            'default': db_config
-        }
-        
+try:
+    if DATABASE_URL:
+        DATABASES = {'default': _postgres_database_config(DATABASE_URL)}
         print(f"✅ DATABASES['default']['ENGINE']: {DATABASES['default'].get('ENGINE')}")
-        print(f"✅ Using PostgreSQL: {db_config.get('NAME', 'Unknown')}")
-        print(f"✅ Host: {db_config.get('HOST', 'Unknown')}")
-        
-    except Exception as e:
-        print(f"⚠️  Error parsing DATABASE_URL: {e}")
-        print("⚠️  Using SQLite as fallback")
-        DATABASES = {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
-        }
-else:
-    print("⚠️  No DATABASE_URL found, using SQLite")
+        print(f"✅ Using PostgreSQL: {DATABASES['default'].get('NAME', 'Unknown')}")
+        print(f"✅ Host: {DATABASES['default'].get('HOST', 'Unknown')}")
+    else:
+        print("⚠️  No DATABASE_URL found, using SQLite")
+        DATABASES = {'default': _sqlite_database_config()}
+except Exception as e:
+    print(f"⚠️  Error parsing DATABASE_URL: {e}")
+    print("⚠️  Using SQLite as fallback")
+    DATABASES = {'default': _sqlite_database_config()}
 
-# ================================================
-# DEBUG: Verify DATABASES is properly configured
-# ================================================
 print("🔍 DEBUG: Checking DATABASES configuration...")
 print(f"🔍 DATABASES type: {type(DATABASES)}")
 print(f"🔍 DATABASES keys: {DATABASES.keys() if DATABASES else 'No DATABASES'}")
@@ -93,19 +79,9 @@ print(f"🔍 DATABASES['default'] type: {type(DATABASES.get('default'))}")
 print(f"🔍 DATABASES['default'] keys: {DATABASES.get('default', {}).keys()}")
 print(f"🔍 DATABASES['default']['ENGINE']: {DATABASES.get('default', {}).get('ENGINE', 'NOT SET')}")
 
-# Force verification: ensure a valid DATABASES dict with ENGINE is present
-if 'default' in DATABASES and DATABASES.get('default', {}).get('ENGINE'):
-    print(f"✅ DATABASE ENGINE CONFIRMED: {DATABASES['default']['ENGINE']}")
-else:
-    print("❌ DATABASE ENGINE NOT FOUND or invalid. Falling back to SQLite for safety.")
-    # Safe fallback to local SQLite to allow manage.py commands to run
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
-    print("⚠️  Using SQLite as emergency fallback database for local operations")
+if not DATABASES.get('default', {}).get('ENGINE'):
+    raise ImproperlyConfigured("DATABASES['default']['ENGINE'] is missing after database configuration.")
+print(f"✅ DATABASE ENGINE CONFIRMED: {DATABASES['default']['ENGINE']}")
 
 # SQLite tuning to reduce "database is locked" errors during concurrent requests
 try:
@@ -371,10 +347,6 @@ ASGI_APPLICATION = 'baysoko.asgi.application'
 LOGIN_REDIRECT_URL = 'home'
 LOGIN_URL = 'login'
 LOGOUT_REDIRECT_URL = 'home'
-
-# Security settings (configurable via environment). These default to
-# secure values in production but remain permissive in development.
-from django.core.exceptions import ImproperlyConfigured
 
 # Handle SECRET_KEY for production
 if not DEBUG:
@@ -750,79 +722,6 @@ MPESA_SIMULATE_PAYMENTS = config('MPESA_SIMULATE_PAYMENTS', default=False, cast=
 
 # How many remaining sellers (with unshipped items) should trigger reminder notifications
 SELLER_SHIPMENT_REMINDER_THRESHOLD = int(os.environ.get('SELLER_SHIPMENT_REMINDER_THRESHOLD', '2'))
-
-# ================================================
-# FINAL VERIFICATION AND FALLBACK
-# ================================================
-
-# Final check: If DATABASES is still messed up, use hardcoded config
-import sys
-
-# Check if we're running migrations or any management command
-if 'manage.py' in ' '.join(sys.argv) or 'migrate' in sys.argv:
-    print(f"🔍 Running command: {' '.join(sys.argv)}")
-    
-    # Force database configuration for management commands
-    if 'DATABASE_URL' in os.environ:
-        DATABASE_URL = os.environ['DATABASE_URL']
-        print(f"🔍 Re-verifying DATABASE_URL for command execution")
-        
-        # Emergency override if engine is wrong
-        if DATABASES.get('default', {}).get('ENGINE') == 'django.db.backends.dummy':
-            print("🚨 EMERGENCY: Dummy backend detected, reparsing DATABASE_URL")
-            try:
-                parsed_db = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-                db_config = {
-                    'ENGINE': 'django.db.backends.postgresql',
-                    'NAME': parsed_db.get('NAME', ''),
-                    'USER': parsed_db.get('USER', ''),
-                    'PASSWORD': parsed_db.get('PASSWORD', ''),
-                    'HOST': parsed_db.get('HOST', ''),
-                    'PORT': str(parsed_db.get('PORT', '') or ''),
-                    'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
-                }
-                options = dict(parsed_db.get('OPTIONS') or {})
-                options.pop('sslmode', None)
-                options.pop('ssl', None)
-                if options:
-                    db_config['OPTIONS'] = options
-                DATABASES = {'default': db_config}
-                print("✅ DATABASE_URL reparsed successfully for management command")
-            except Exception as db_err:
-                print(f"❌ Failed to reparse DATABASE_URL: {db_err}")
-                raise ImproperlyConfigured(
-                    "DATABASE_URL is set but could not be parsed into a valid PostgreSQL configuration."
-                )
-
-# Final safety net: never allow a dummy backend to survive into runtime.
-if DATABASES.get('default', {}).get('ENGINE') == 'django.db.backends.dummy':
-    if DATABASE_URL and DATABASE_URL.strip():
-        try:
-            parsed_db = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-            db_config = {
-                'ENGINE': 'django.db.backends.postgresql',
-                'NAME': parsed_db.get('NAME', ''),
-                'USER': parsed_db.get('USER', ''),
-                'PASSWORD': parsed_db.get('PASSWORD', ''),
-                'HOST': parsed_db.get('HOST', ''),
-                'PORT': str(parsed_db.get('PORT', '') or ''),
-                'CONN_MAX_AGE': parsed_db.get('CONN_MAX_AGE', 600),
-            }
-            options = dict(parsed_db.get('OPTIONS') or {})
-            options.pop('sslmode', None)
-            options.pop('ssl', None)
-            if options:
-                db_config['OPTIONS'] = options
-            DATABASES = {'default': db_config}
-            print("✅ Final DATABASE_URL reparse cleared dummy backend")
-        except Exception as db_err:
-            raise ImproperlyConfigured(
-                f"settings.DATABASES resolved to dummy backend and DATABASE_URL reparsing failed: {db_err}"
-            )
-    else:
-        raise ImproperlyConfigured(
-            "settings.DATABASES resolved to dummy backend and no DATABASE_URL is configured."
-        )
 
 # Final debug output
 print("=" * 50)
