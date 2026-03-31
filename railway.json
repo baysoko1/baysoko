@@ -5,10 +5,7 @@
     "buildCommand": "bash build.sh"
   },
   "deploy": {
-<<<<<<< HEAD
     "preDeployCommand": "bash baysoko/deploy/railway_release.sh",
-=======
->>>>>>> e9880acd1351925800ac90ecb95f1b6f60a3ee82
     "startCommand": "bash baysoko/deploy/railway_start.sh",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
