@@ -785,7 +785,9 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 
 # Redis for caching and channels (with safe local fallback)
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/1')
+REDIS_URL = os.environ.get('REDIS_URL')
+if not REDIS_URL and (DEBUG or RUNNING_RUNSERVER):
+    REDIS_URL = 'redis://localhost:6379/1'
 USE_REDIS_CACHE = False
 FORCE_REDIS_CACHE = os.environ.get('FORCE_REDIS_CACHE', '').lower() in ('1', 'true', 'yes')
 LOCAL_REDIS = isinstance(REDIS_URL, str) and ('localhost' in REDIS_URL or '127.0.0.1' in REDIS_URL)
@@ -838,7 +840,7 @@ try:
         port = parsed.port or 6379
         channels_hosts = [(host, port)]
 except Exception:
-    channels_hosts = ['redis://localhost:6379/1']
+    channels_hosts = ['redis://localhost:6379/1'] if (DEBUG or RUNNING_RUNSERVER) else []
 
 # Use Redis-backed channel layer in production when REDIS_URL is available.
 try:
@@ -865,6 +867,8 @@ try:
                 use_redis_channel = True
         except Exception as e:
             print(f"⚠️  Could not probe Redis server at {REDIS_URL}: {e}; using InMemoryChannelLayer")
+    elif not (DEBUG or RUNNING_RUNSERVER):
+        print("ℹ️  No REDIS_URL configured for this environment; using LocMem cache and InMemoryChannelLayer.")
 
     if use_redis_channel:
         CHANNEL_LAYERS = {
