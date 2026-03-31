@@ -7,8 +7,12 @@ cd "$APP_DIR"
 
 echo "-> Running database migrations"
 if python manage.py migrate --noinput; then
-  echo "-> Collecting static files"
-  python manage.py collectstatic --noinput
+  echo "-> Collecting static files if supported"
+  if python manage.py help collectstatic >/dev/null 2>&1; then
+    python manage.py collectstatic --noinput || echo "-> collectstatic failed; continuing with WhiteNoise finder-based static serving"
+  else
+    echo "-> collectstatic command unavailable; continuing with WhiteNoise finder-based static serving"
+  fi
 
   echo "-> Configuring OAuth providers"
   python manage.py configure_oauth

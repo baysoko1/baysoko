@@ -8,8 +8,12 @@ cd "$APP_DIR"
 echo "-> Railway startup: running migrations"
 python manage.py migrate --noinput
 
-echo "-> Railway startup: collecting static files"
-python manage.py collectstatic --noinput
+echo "-> Railway startup: collecting static files if supported"
+if python manage.py help collectstatic >/dev/null 2>&1; then
+  python manage.py collectstatic --noinput || echo "-> collectstatic failed; continuing with WhiteNoise finder-based static serving"
+else
+  echo "-> collectstatic command unavailable; continuing with WhiteNoise finder-based static serving"
+fi
 
 echo "-> Railway startup: configuring OAuth providers"
 python manage.py configure_oauth
