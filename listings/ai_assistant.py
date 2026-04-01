@@ -141,66 +141,67 @@ def generate_listing_fields(title: str, context=None):
         os.environ['GEMINI_API_KEY'] = api_key
         os.environ['GOOGLE_API_KEY'] = api_key
 
-    try:
-        from google import genai
-        client = genai.Client()
-        cached = cache.get('gemini_working_model')
-        candidates = getattr(settings, 'GEMINI_CANDIDATE_MODELS', None)
-        attempt_models = []
-        if cached:
-            attempt_models.append(cached)
-        if candidates:
-            if model_name and model_name not in candidates:
-                attempt_models.append(model_name)
-            for c in candidates:
-                if c not in attempt_models:
-                    attempt_models.append(c)
-        else:
-            if model_name:
-                attempt_models.append(model_name)
+    if getattr(settings, 'GEMINI_USE_GENAI_CLIENT', False):
+        try:
+            from google import genai
+            client = genai.Client()
+            cached = cache.get('gemini_working_model')
+            candidates = getattr(settings, 'GEMINI_CANDIDATE_MODELS', None)
+            attempt_models = []
+            if cached:
+                attempt_models.append(cached)
+            if candidates:
+                if model_name and model_name not in candidates:
+                    attempt_models.append(model_name)
+                for c in candidates:
+                    if c not in attempt_models:
+                        attempt_models.append(c)
+            else:
+                if model_name:
+                    attempt_models.append(model_name)
 
-        resp = None
-        working_model = None
-        probe_attempts = []
-        for m in attempt_models:
-            try:
-                probe_attempts.append({'model': m, 'attempted_at': timezone.now().isoformat()})
-                resp = client.models.generate_content(model=m, contents=prompt)
-                if resp is not None:
-                    working_model = m
-                    cache.set('gemini_working_model', working_model, 60*60*24)
-                    cache.set('gemini_probe_log', {'attempts': probe_attempts, 'working_model': working_model, 'checked_at': timezone.now().isoformat()}, 60*60*24)
-                    break
-            except Exception:
-                probe_attempts.append({'model': m, 'error': 'attempt failed', 'time': timezone.now().isoformat()})
-                continue
+            resp = None
+            working_model = None
+            probe_attempts = []
+            for m in attempt_models:
+                try:
+                    probe_attempts.append({'model': m, 'attempted_at': timezone.now().isoformat()})
+                    resp = client.models.generate_content(model=m, contents=prompt)
+                    if resp is not None:
+                        working_model = m
+                        cache.set('gemini_working_model', working_model, 60*60*24)
+                        cache.set('gemini_probe_log', {'attempts': probe_attempts, 'working_model': working_model, 'checked_at': timezone.now().isoformat()}, 60*60*24)
+                        break
+                except Exception:
+                    probe_attempts.append({'model': m, 'error': 'attempt failed', 'time': timezone.now().isoformat()})
+                    continue
 
-        if resp is None:
-            cache.set('gemini_probe_log', {'attempts': probe_attempts, 'working_model': None, 'checked_at': timezone.now().isoformat()}, 60*60*24)
-            raise RuntimeError('No working Gemini model found via genai client')
+            if resp is None:
+                cache.set('gemini_probe_log', {'attempts': probe_attempts, 'working_model': None, 'checked_at': timezone.now().isoformat()}, 60*60*24)
+                raise RuntimeError('No working Gemini model found via genai client')
 
-        text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
-        parsed = _extract_json(text)
-        if parsed:
-            dyn = parsed.get('dynamic_fields', {}) or {}
-            for k, v in shorthand.items():
-                if k not in dyn and v is not None:
-                    dyn[k] = v
-            if dyn:
-                parsed['dynamic_fields'] = dyn
-            return _enrich_parsed(parsed)
-        if shorthand:
-            fallback = {
-                'category': 'Other',
-                'description': f'Auto-generated description for "{title}". Please review.',
-                'key_features': [],
-                'target_audience': 'general',
-                'dynamic_fields': shorthand,
-            }
-            return _enrich_parsed(fallback)
-        return {"raw": text}
-    except Exception as e:
-        logger.debug('genai client failed; falling back to REST API', exc_info=True)
+            text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
+            parsed = _extract_json(text)
+            if parsed:
+                dyn = parsed.get('dynamic_fields', {}) or {}
+                for k, v in shorthand.items():
+                    if k not in dyn and v is not None:
+                        dyn[k] = v
+                if dyn:
+                    parsed['dynamic_fields'] = dyn
+                return _enrich_parsed(parsed)
+            if shorthand:
+                fallback = {
+                    'category': 'Other',
+                    'description': f'Auto-generated description for "{title}". Please review.',
+                    'key_features': [],
+                    'target_audience': 'general',
+                    'dynamic_fields': shorthand,
+                }
+                return _enrich_parsed(fallback)
+            return {"raw": text}
+        except Exception as e:
+            logger.debug('genai client failed; falling back to REST API', exc_info=True)
 
     # REST fallback
     if not api_key:
@@ -706,19 +707,20 @@ def _contradicts_retrieval(model_text, retrieval_text=None, retrieval_items=None
 def _generate_gemini_text(prompt_text):
     prompt_text = str(prompt_text or '')
     models = _get_assistant_gemini_models()
-    try:
-        from google import genai
-        client = genai.Client()
-        for model in models:
-            try:
-                resp = client.models.generate_content(model=model, contents=prompt_text)
-                text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
-                if text:
-                    return str(text).strip()
-            except Exception:
-                continue
-    except Exception:
-        logger.debug('Gemini client final-response generation failed; trying REST fallback', exc_info=True)
+    if getattr(settings, 'GEMINI_USE_GENAI_CLIENT', False):
+        try:
+            from google import genai
+            client = genai.Client()
+            for model in models:
+                try:
+                    resp = client.models.generate_content(model=model, contents=prompt_text)
+                    text = getattr(resp, 'text', None) or getattr(resp, 'response', None) or str(resp)
+                    if text:
+                        return str(text).strip()
+                except Exception:
+                    continue
+        except Exception:
+            logger.debug('Gemini client final-response generation failed; trying REST fallback', exc_info=True)
 
     try:
         api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)

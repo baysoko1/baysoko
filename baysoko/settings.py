@@ -345,6 +345,7 @@ _assistant_candidates_raw = config('BAYSOKO_ASSISTANT_GEMINI_CANDIDATES', defaul
 BAYSOKO_ASSISTANT_GEMINI_CANDIDATES = [
     m.strip() for m in str(_assistant_candidates_raw).split(',') if m.strip()
 ] or [BAYSOKO_ASSISTANT_GEMINI_MODEL]
+GEMINI_USE_GENAI_CLIENT = config('GEMINI_USE_GENAI_CLIENT', default=DEBUG, cast=bool)
 
 # Channels (WebSocket) configuration - in-memory layer for development
 ASGI_APPLICATION = 'baysoko.asgi.application'
