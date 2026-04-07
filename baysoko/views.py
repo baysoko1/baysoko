@@ -80,6 +80,26 @@ def manifest(request):
         return HttpResponse('', content_type='application/manifest+json', status=500)
 
 
+def assetlinks(request):
+    """Serve Android Digital Asset Links for TWA / App Links verification."""
+    package_name = (getattr(settings, 'ANDROID_APP_PACKAGE', '') or '').strip()
+    fingerprints_raw = (getattr(settings, 'ANDROID_APP_SHA256', '') or '').strip()
+    fingerprints = [fp.strip() for fp in fingerprints_raw.split(',') if fp.strip()]
+    payload = []
+    if package_name and fingerprints:
+        payload.append({
+            "relation": [
+                "delegate_permission/common.handle_all_urls"
+            ],
+            "target": {
+                "namespace": "android_app",
+                "package_name": package_name,
+                "sha256_cert_fingerprints": fingerprints,
+            },
+        })
+    return JsonResponse(payload, safe=False)
+
+
 @csrf_exempt
 def pwa_install_event(request):
     """Record a best-effort PWA install event."""

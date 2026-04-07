@@ -3,7 +3,22 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <script>
+        (function() {
+            const searchParams = new URLSearchParams(window.location.search);
+            const userAgent = navigator.userAgent || '';
+            const isAndroidShell = searchParams.get('source') === 'android_app'
+                || /\bBaysokoAndroidApp\b/i.test(userAgent)
+                || !!window.Capacitor
+                || /\bwv\b/i.test(userAgent);
+            if (isAndroidShell) {
+                document.documentElement.classList.add('android-shell');
+                document.documentElement.style.setProperty('--android-safe-top', 'env(safe-area-inset-top, 0px)');
+                document.documentElement.style.setProperty('--android-safe-bottom', 'env(safe-area-inset-bottom, 0px)');
+            }
+        })();
+    </script>
     {% if user.is_authenticated %}
     <meta name="current-user-id" content="{{ user.id }}">
     <script>
@@ -61,6 +76,63 @@
         /* Add safe area inset for iOS notch */
         .safe-area-top {
             padding-top: env(safe-area-inset-top);
+        }
+        html.android-shell {
+            background: #0f1115;
+            overscroll-behavior-y: none;
+            scrollbar-width: none;
+        }
+        html.android-shell::-webkit-scrollbar,
+        body.android-shell::-webkit-scrollbar {
+            width: 0;
+            height: 0;
+        }
+        body.android-shell {
+            min-height: 100vh;
+            min-height: 100dvh;
+            background:
+                radial-gradient(circle at top, rgba(255,107,53,0.14), transparent 28%),
+                linear-gradient(180deg, #0f1115 0%, #121826 100%);
+            overscroll-behavior-y: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            padding-bottom: max(14px, env(safe-area-inset-bottom));
+        }
+        body.android-shell .main-nav {
+            top: 0 !important;
+            padding-top: calc(var(--android-safe-top, 0px) + 6px);
+            min-height: calc(68px + var(--android-safe-top, 0px));
+            background: linear-gradient(180deg, rgba(17,24,39,0.96), rgba(17,24,39,0.86));
+            backdrop-filter: blur(18px);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 14px 30px rgba(0,0,0,0.2);
+        }
+        body.android-shell .main-content {
+            padding-top: calc(78px + var(--android-safe-top, 0px)) !important;
+            padding-bottom: calc(18px + var(--android-safe-bottom, 0px));
+        }
+        body.android-shell .mobile-bottom-nav,
+        body.android-shell .bottom-navbar,
+        body.android-shell .delivery-bottom-nav {
+            padding-bottom: max(10px, env(safe-area-inset-bottom));
+            background: rgba(15, 17, 21, 0.96);
+            backdrop-filter: blur(18px);
+        }
+        body.android-shell .chat-widget,
+        body.android-shell .chat-toggle,
+        body.android-shell .floating-chat-btn,
+        body.android-shell .floating-action-btn {
+            bottom: calc(16px + var(--android-safe-bottom, 0px));
+        }
+        body.android-shell input,
+        body.android-shell select,
+        body.android-shell textarea,
+        body.android-shell button,
+        body.android-shell a {
+            touch-action: manipulation;
+        }
+        body.android-shell a[target="_blank"][href*="baysoko.up.railway.app"] {
+            target-name: current;
         }
 
         .pwa-install-banner {
@@ -3897,7 +3969,7 @@
         {% include 'includes/agent_widget.html' %}
         <script src="{% static 'js/agent_widget.js' %}"></script>
     {% endif %}
-    <script>
+        <script>
         (function() {
             if (!('serviceWorker' in navigator)) return;
             navigator.serviceWorker.register("{% url 'service_worker' %}")
@@ -3910,10 +3982,34 @@
             const installTriggers = Array.from(document.querySelectorAll('[data-pwa-install-trigger]'));
             const banner = document.getElementById('pwaInstallBanner');
             const closeBtn = document.getElementById('pwaInstallClose');
+            const searchParams = new URLSearchParams(window.location.search);
+            const userAgent = navigator.userAgent || '';
+            const isAndroidShell = searchParams.get('source') === 'android_app'
+                || /\bBaysokoAndroidApp\b/i.test(userAgent)
+                || !!window.Capacitor
+                || /\bwv\b/i.test(userAgent);
             const dismissedKey = 'baysoko_pwa_banner_dismissed_at';
             const installedKey = 'baysoko_pwa_installed';
             const dismissCountKey = 'baysoko_pwa_banner_dismiss_count';
             const neverKey = 'baysoko_pwa_banner_never';
+            if (isAndroidShell) {
+                if (banner) banner.classList.remove('visible');
+                if (banner) banner.classList.add('hidden');
+                document.documentElement.classList.add('android-shell');
+                document.body.classList.add('android-shell');
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.querySelectorAll('a[target="_blank"]').forEach((link) => {
+                        try {
+                            const href = link.getAttribute('href') || '';
+                            if (href.startsWith('/') || href.includes('baysoko.up.railway.app')) {
+                                link.setAttribute('target', '_self');
+                                link.setAttribute('rel', 'noopener');
+                            }
+                        } catch (e) {}
+                    });
+                });
+                return;
+            }
             function applyBannerOffset(show) {
                 if (!banner) return;
                 const height = banner.offsetHeight || 0;

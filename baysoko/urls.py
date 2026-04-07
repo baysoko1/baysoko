@@ -32,6 +32,7 @@ urlpatterns = [
     path('healthz/', views.health, name='health'),
     path('service-worker.js', views.service_worker, name='service_worker'),
     path('manifest.json', views.manifest, name='manifest'),
+    path('.well-known/assetlinks.json', views.assetlinks, name='assetlinks'),
     path('pwa/install/', views.pwa_install_event, name='pwa_install_event'),
     
     # Delivery System

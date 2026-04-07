@@ -1,0 +1,32 @@
+{
+  "name": "baysoko-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android wrapper for Baysoko using Capacitor.",
+  "scripts": {
+    "setup": "npm install",
+    "android:init": "npx cap add android && node scripts/apply-android-patches.mjs",
+    "android:sync": "npx cap sync android && node scripts/apply-android-patches.mjs",
+    "android:prepare": "npx cap sync android && node scripts/apply-android-patches.mjs",
+    "android:open": "npx cap open android",
+    "android:build:debug": "npx cap sync android && node scripts/apply-android-patches.mjs && npx cap open android",
+    "android:doctor": "node scripts/doctor.mjs",
+    "android:release:help": "node scripts/release-help.mjs",
+    "twa:help": "node scripts/twa-help.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.1.0",
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/browser": "^7.0.1",
+    "@capacitor/core": "^7.1.0",
+    "@capacitor/device": "^7.0.1",
+    "@capacitor/network": "^7.0.1",
+    "@capacitor/share": "^7.0.1",
+    "@capacitor/splash-screen": "^7.0.1",
+    "@capacitor/status-bar": "^7.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.1.0",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "host": "baysoko.up.railway.app",
+  "name": "Baysoko",
+  "launcherName": "Baysoko",
+  "display": "standalone",
+  "themeColor": "#ff6b35",
+  "backgroundColor": "#0f0f10",
+  "startUrl": "/?source=twa",
+  "applicationId": "com.baysoko.marketplace",
+  "fallbackType": "customtabs",
+  "enableNotifications": false,
+  "orientation": "portrait"
+}

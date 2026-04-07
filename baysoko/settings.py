@@ -346,6 +346,8 @@ BAYSOKO_ASSISTANT_GEMINI_CANDIDATES = [
     m.strip() for m in str(_assistant_candidates_raw).split(',') if m.strip()
 ] or [BAYSOKO_ASSISTANT_GEMINI_MODEL]
 GEMINI_USE_GENAI_CLIENT = config('GEMINI_USE_GENAI_CLIENT', default=DEBUG, cast=bool)
+ANDROID_APP_PACKAGE = config('ANDROID_APP_PACKAGE', default='com.baysoko.marketplace')
+ANDROID_APP_SHA256 = config('ANDROID_APP_SHA256', default='')
 
 # Channels (WebSocket) configuration - in-memory layer for development
 ASGI_APPLICATION = 'baysoko.asgi.application'
