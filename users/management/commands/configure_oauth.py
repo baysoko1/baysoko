@@ -1,4 +1,14 @@
 # users/management/commands/configure_oauth.py
+#
+# IMPORTANT — Correct redirect URIs for each OAuth provider:
+#
+#   Google OAuth Console  → https://baysoko.up.railway.app/accounts/google/callback/
+#   Facebook Developer    → https://baysoko.up.railway.app/accounts/facebook/callback/
+#
+# These paths are PROVIDER-SPECIFIC. Do NOT use the Facebook callback URL in
+# the Google OAuth Console, or vice versa. A mismatch will cause a
+# redirect_uri_mismatch error and block sign-in for that provider.
+#
 from django.core.management.base import BaseCommand
 from django.contrib.sites.models import Site
 from allauth.socialaccount.models import SocialApp
@@ -32,15 +42,19 @@ class Command(BaseCommand):
         self.stdout.write("✅ OAuth Configuration Complete!")
         self.stdout.write("="*50)
         
+        # Each provider has its own callback path — they must be registered
+        # in the correct console. Google uses /accounts/google/callback/ and
+        # Facebook uses /accounts/facebook/callback/.
         self.stdout.write("\n📋 Redirect URIs to configure in provider dashboards:")
         self.stdout.write("-" * 50)
-        self.stdout.write("Google OAuth Console:")
-        self.stdout.write(f"  Redirect URI: {site_url}/accounts/google/callback/")
+        self.stdout.write("Google OAuth Console  (console.cloud.google.com):")
+        self.stdout.write(f"  ✅ Authorized redirect URI: {site_url}/accounts/google/callback/")
         self.stdout.write("")
-        self.stdout.write("Facebook Developer Console:")
-        self.stdout.write(f"  Redirect URI: {site_url}/accounts/facebook/callback/")
+        self.stdout.write("Facebook Developer Console  (developers.facebook.com):")
+        self.stdout.write(f"  ✅ Valid OAuth Redirect URI: {site_url}/accounts/facebook/callback/")
         
         self.stdout.write("\n💡 Tip: Make sure these URIs are EXACTLY as shown above.")
+        self.stdout.write("⚠️  Do NOT use the Facebook callback URL in the Google Console, or vice versa.")
         
     def configure_provider(self, provider, display_name):
         """Configure a single OAuth provider"""
