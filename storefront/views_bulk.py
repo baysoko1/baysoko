@@ -171,7 +171,7 @@ def bulk_import_data(request, slug):
                     batch_job.parameters['field_mapping'] = fm
             batch_job.save()
             
-            # Start async task; if broker (Redis) is unavailable, keep job pending and warn user
+            # Start async task; if broker (Redis) is unavailable, fall back to synchronous execution
             try:
                 process_import_task.delay(batch_job.id)
                 messages.success(
@@ -180,11 +180,22 @@ def bulk_import_data(request, slug):
                     f'Processing {batch_job.file.name}.'
                 )
             except Exception as exc:
-                # If broker unavailable, fall back to synchronous execution so import still works
-                logger.exception('Failed to enqueue import job %s: %s — falling back to synchronous run', batch_job.id, exc)
+                # Broker unavailable — run the task synchronously so the import still completes.
+                logger.exception(
+                    'Failed to enqueue import job %s: %s — falling back to synchronous run',
+                    batch_job.id, exc,
+                )
                 try:
-                    # Run the task synchronously in-process without touching Celery result backends.
-                    process_import_task.run(batch_job.id)
+                    # Transition to 'processing' before running so the job detail page
+                    # reflects the correct state if the user refreshes mid-run.
+                    batch_job.status = 'processing'
+                    batch_job.started_at = timezone.now()
+                    batch_job.save(update_fields=['status', 'started_at'])
+                    logger.info('Running import job %s synchronously (no broker)', batch_job.id)
+                    # Call the underlying task function directly — .run() does not exist on
+                    # Celery tasks; calling the task object itself invokes the body without
+                    # going through the broker or result backend.
+                    process_import_task(batch_job.id)
                     messages.success(
                         request,
                         f'Import job #{batch_job.id} was processed synchronously.'
