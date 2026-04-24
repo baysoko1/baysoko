@@ -1,4 +1,14 @@
-# users/management/commands/verify_oauth.py - Updated version
+# users/management/commands/verify_oauth.py
+#
+# IMPORTANT — Correct redirect URIs for each OAuth provider:
+#
+#   Google OAuth Console  → https://baysoko.up.railway.app/accounts/google/callback/
+#   Facebook Developer    → https://baysoko.up.railway.app/accounts/facebook/callback/
+#
+# These paths are PROVIDER-SPECIFIC. Do NOT use the Facebook callback URL in
+# the Google OAuth Console, or vice versa. A mismatch will cause a
+# redirect_uri_mismatch error and block sign-in for that provider.
+#
 from django.core.management.base import BaseCommand
 from django.contrib.sites.models import Site
 from allauth.socialaccount.models import SocialApp
