@@ -21,6 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from django.db import transaction
 from django.utils import timezone
+import logging
 from .models import Category, Listing, ListingImage, Activity
 # Import Store from storefront app (avoid importing Store from listings.models)
 try:
@@ -29,6 +30,8 @@ except Exception:
     Store = None
 from .forms import AIListingForm
 from .ai_listing_helper import listing_ai
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -40,10 +43,21 @@ def ai_generate_listing(request):
         return JsonResponse({'error': 'Invalid request'}, status=400)
     
     try:
+        from storefront.ai_copilot import has_seller_ai_access
+
         data = json.loads(request.body)
         title = data.get('title', '').strip()
         description = data.get('description', '').strip()
         current_category = data.get('category', '')
+        user_store = None
+        if Store is not None:
+            user_store = Store.objects.filter(owner=request.user).first()
+
+        if not has_seller_ai_access(request.user, store=user_store):
+            return JsonResponse({
+                'error': 'Baysoko AI Copilot is available on Premium and Enterprise plans.',
+                'success': False,
+            }, status=403)
         
         if not title:
             return JsonResponse({'error': 'Title is required'}, status=400)

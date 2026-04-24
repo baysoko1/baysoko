@@ -24,13 +24,14 @@ class BatchJob(models.Model):
         ('pending', 'Pending'),
         ('processing', 'Processing'),
         ('completed', 'Completed'),
+        ('completed_with_errors', 'Completed With Errors'),
         ('failed', 'Failed'),
         ('cancelled', 'Cancelled'),
     ]
     
     store = models.ForeignKey('Store', on_delete=models.CASCADE, related_name='batch_jobs')
     job_type = models.CharField(max_length=20, choices=JOB_TYPES)
-    status = models.CharField(max_length=20, choices=JOB_STATUS, default='pending')
+    status = models.CharField(max_length=32, choices=JOB_STATUS, default='pending')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
     parameters = models.JSONField(default=dict)  # Store job parameters
     results = models.JSONField(default=dict)  # Store job results
@@ -88,7 +89,7 @@ class ExportJob(models.Model):
     file_size = models.IntegerField(default=0)
     download_count = models.IntegerField(default=0)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
-    status = models.CharField(max_length=20, choices=BatchJob.JOB_STATUS, default='pending')
+    status = models.CharField(max_length=32, choices=BatchJob.JOB_STATUS, default='pending')
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)

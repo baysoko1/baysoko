@@ -48,6 +48,7 @@ bulk_patterns = [
     # AJAX Endpoints
     path('dashboard/store/<slug:slug>/bulk/ajax/export-columns/', lazy_view('storefront.views_bulk.get_export_columns'), name='get_export_columns'),
     path('dashboard/store/<slug:slug>/bulk/ajax/quick-action/', lazy_view('storefront.views_bulk.quick_bulk_action'), name='quick_bulk_action'),
+    path('dashboard/store/<slug:slug>/bulk/ajax/ai-preflight/', lazy_view('storefront.views_bulk.ai_bulk_import_preflight'), name='ai_bulk_import_preflight'),
 ]
 
 bundle_patterns = [

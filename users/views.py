@@ -32,6 +32,7 @@ from django.http import JsonResponse, HttpResponse
 from django.core.paginator import Paginator
 from django.core.mail import send_mail, get_connection, EmailMessage as DjangoEmailMessage, EmailMultiAlternatives
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import models, transaction, IntegrityError
 from django.conf import settings
 from django.utils import timezone
@@ -166,6 +167,97 @@ def _normalize_next_url(next_url):
 
 def _is_delivery_next(next_url):
     return bool(next_url and next_url.startswith('/delivery'))
+
+
+def _complete_google_identity_login(request, userinfo, action=None):
+    email = (userinfo.get('email') or '').strip().lower()
+    if not email:
+        messages.error(request, "Email not provided by Google")
+        return redirect('register')
+
+    action = action or request.session.get('oauth_action')
+    if action == 'connect' and request.user.is_authenticated:
+        if email != (request.user.email or '').lower():
+            messages.error(request, 'Google account email does not match your account email.')
+            return redirect('profile-edit', pk=request.user.pk)
+        uid = userinfo.get('id') or userinfo.get('sub')
+        if uid and not SocialAccount.objects.filter(user=request.user, provider='google', uid=uid).exists():
+            SocialAccount.objects.create(user=request.user, provider='google', uid=uid, extra_data=userinfo)
+        messages.success(request, 'Google account connected successfully.')
+        return redirect('profile-edit', pk=request.user.pk)
+
+    try:
+        users = User.objects.filter(email__iexact=email).order_by('date_joined', 'id')
+        if users.count() > 1:
+            logger.warning("Google sign-in: multiple users found for email=%s; using earliest account.", email)
+        user = users.first()
+        if not user:
+            raise User.DoesNotExist()
+        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        _sync_from_delivery_profile(user)
+        next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
+        is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
+        if is_delivery_flow:
+            if not getattr(user, 'email_verified', False):
+                request.session['post_verify_redirect'] = next_url or reverse('delivery:dashboard')
+                request.session['delivery_login_intent'] = True
+                return redirect('verification_required')
+            request.session['delivery_auth'] = True
+            request.session.pop('delivery_login_intent', None)
+            return redirect(next_url or reverse('delivery:dashboard'))
+        if not user.phone_number:
+            messages.info(request, 'Please verify your details and include phone number to continue.')
+            return redirect('profile-edit', pk=user.pk)
+        if not user.location:
+            messages.info(request, 'Please add your location to continue.')
+            return redirect('profile-edit', pk=user.pk)
+        messages.success(request, f"Welcome back, {user.first_name}!")
+        return redirect('home')
+    except User.DoesNotExist:
+        username = email.split('@')[0]
+        original = username
+        counter = 1
+        while User.objects.filter(username=username).exists():
+            username = f"{original}{counter}"
+            counter += 1
+
+        pending_location = (request.session.pop('pending_location', '') or '').strip()
+        user = User.objects.create(
+            email=email,
+            username=username,
+            first_name=userinfo.get('given_name', ''),
+            last_name=userinfo.get('family_name', ''),
+            location=pending_location,
+            phone_number=None,
+            is_active=True
+        )
+        user.set_unusable_password()
+        code = ''.join(random.choices(string.digits, k=7))
+        user.email_verification_code = code
+        user.email_verification_sent_at = timezone.now()
+        user.email_verified = False
+        user.save()
+
+        send_verification_email(user)
+        try:
+            send_welcome_email(user)
+        except Exception:
+            logger.exception('Failed to queue welcome email for social signup')
+
+        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
+        is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
+        if is_delivery_flow:
+            request.session['post_verify_redirect'] = next_url or reverse('delivery:dashboard')
+            request.session['delivery_login_intent'] = True
+            messages.success(request, 'Account created. Please verify your email to continue.')
+            return redirect('verification_required')
+        request.session['just_registered'] = True
+        request.session['just_registered_message'] = 'Account created with Google! Check your email to verify your account.'
+        if not user.location:
+            messages.info(request, 'Please add your location to continue.')
+            return redirect('profile-edit', pk=user.pk)
+        return redirect('verification_required')
 
 from baysoko.utils.email_helpers import _send_email_threaded, send_email_brevo, render_and_send
 from notifications.utils import notify_system_message
@@ -604,6 +696,56 @@ def resend_code(request):
         logger.exception('Error in resend_code')
         return JsonResponse({'success': False, 'error': 'Server error while resending code.'})
 
+
+@login_required
+@require_http_methods(["POST"])
+def change_verification_email(request):
+    if request.user.email_verified:
+        return JsonResponse({'success': False, 'error': 'Your email is already verified.'}, status=400)
+
+    new_email = (request.POST.get('email') or '').strip().lower()
+    if not new_email:
+        return JsonResponse({'success': False, 'error': 'Enter an email address.'}, status=400)
+
+    try:
+        validate_email(new_email)
+    except ValidationError:
+        return JsonResponse({'success': False, 'error': 'Enter a valid email address.'}, status=400)
+
+    if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
+        return JsonResponse({'success': False, 'error': 'That email is already in use.'}, status=400)
+
+    user = request.user
+    now = timezone.now()
+    if user.email_verification_sent_at and (now - user.email_verification_sent_at).seconds < 45:
+        wait = 45 - (now - user.email_verification_sent_at).seconds
+        return JsonResponse(
+            {'success': False, 'error': f'Please wait {wait} seconds before requesting another email.', 'wait': wait},
+            status=429,
+        )
+
+    user.email = new_email
+    user.email_verified = False
+    user.verification_attempts_today = 0
+    user.last_verification_attempt_date = now.date()
+    user.email_verification_code = ''.join(random.choices(string.digits, k=7))
+    user.email_verification_sent_at = now
+    user.save(update_fields=[
+        'email',
+        'email_verified',
+        'verification_attempts_today',
+        'last_verification_attempt_date',
+        'email_verification_code',
+        'email_verification_sent_at',
+    ])
+
+    send_verification_email(user)
+    return JsonResponse({
+        'success': True,
+        'message': f'Verification code sent to {user.email}.',
+        'email': user.email,
+    })
+
 @csrf_exempt
 def verify_phone(request):
     # Handles both GET (render + send) and POST (verify)
@@ -773,7 +915,7 @@ def google_login(request):
             'response_type': 'code',
             'scope': 'email profile',
             'access_type': 'online',
-            'prompt': 'consent',
+            'prompt': 'select_account consent',
         }
         state = secrets.token_urlsafe(32)
         request.session['oauth_state'] = state
@@ -818,7 +960,7 @@ def google_connect(request):
             'response_type': 'code',
             'scope': 'email profile',
             'access_type': 'online',
-            'prompt': 'consent',
+            'prompt': 'select_account consent',
         }
         state = secrets.token_urlsafe(32)
         request.session['oauth_state'] = state
@@ -875,96 +1017,7 @@ def google_callback(request):
             return _redirect_after_google_error(request)
         userinfo = userinfo_resp.json()
 
-        email = userinfo.get('email')
-        if not email:
-            messages.error(request, "Email not provided by Google")
-            return redirect('register')
-
-        action = request.session.get('oauth_action')
-        if action == 'connect' and request.user.is_authenticated:
-            if email.lower() != request.user.email.lower():
-                messages.error(request, 'Google account email does not match your account email.')
-                return redirect('profile-edit', pk=request.user.pk)
-            uid = userinfo.get('id')
-            if not SocialAccount.objects.filter(user=request.user, provider='google', uid=uid).exists():
-                SocialAccount.objects.create(user=request.user, provider='google', uid=uid, extra_data=userinfo)
-            messages.success(request, 'Google account connected successfully.')
-            return redirect('profile-edit', pk=request.user.pk)
-
-        try:
-            users = User.objects.filter(email__iexact=email).order_by('date_joined', 'id')
-            if users.count() > 1:
-                logger.warning("Google callback: multiple users found for email=%s; using earliest account.", email)
-            user = users.first()
-            if not user:
-                raise User.DoesNotExist()
-            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-            _sync_from_delivery_profile(user)
-            next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
-            is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
-            if is_delivery_flow:
-                # If email not verified yet, route through verification then back to delivery
-                if not getattr(user, 'email_verified', False):
-                    request.session['post_verify_redirect'] = next_url or reverse('delivery:dashboard')
-                    request.session['delivery_login_intent'] = True
-                    return redirect('verification_required')
-                request.session['delivery_auth'] = True
-                request.session.pop('delivery_login_intent', None)
-                return redirect(next_url or reverse('delivery:dashboard'))
-            if not user.phone_number:
-                messages.info(request, 'Please verify your details and include phone number to continue.')
-                return redirect('profile-edit', pk=user.pk)
-            if not user.location:
-                messages.info(request, 'Please add your location to continue.')
-                return redirect('profile-edit', pk=user.pk)
-            messages.success(request, f"Welcome back, {user.first_name}!")
-            return redirect('home')
-        except User.DoesNotExist:
-            username = email.split('@')[0]
-            original = username
-            counter = 1
-            while User.objects.filter(username=username).exists():
-                username = f"{original}{counter}"
-                counter += 1
-
-            pending_location = (request.session.pop('pending_location', '') or '').strip()
-            user = User.objects.create(
-                email=email.lower(),
-                username=username,
-                first_name=userinfo.get('given_name', ''),
-                last_name=userinfo.get('family_name', ''),
-                location=pending_location,
-                phone_number=None,
-                is_active=True
-            )
-            user.set_unusable_password()
-            code = ''.join(random.choices(string.digits, k=7))
-            user.email_verification_code = code
-            user.email_verification_sent_at = timezone.now()
-            user.email_verified = False
-            user.save()
-
-            send_verification_email(user)
-            try:
-                send_welcome_email(user)
-            except Exception:
-                logger.exception('Failed to queue welcome email for social signup')
-
-            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-            next_url = _normalize_next_url(request.session.pop('post_login_redirect', None))
-            is_delivery_flow = _is_delivery_next(next_url) or bool(request.session.get('delivery_login_intent'))
-            if is_delivery_flow:
-                # New delivery user must verify email first, then land in delivery app
-                request.session['post_verify_redirect'] = next_url or reverse('delivery:dashboard')
-                request.session['delivery_login_intent'] = True
-                messages.success(request, 'Account created. Please verify your email to continue.')
-                return redirect('verification_required')
-            request.session['just_registered'] = True
-            request.session['just_registered_message'] = 'Account created with Google! Check your email to verify your account.'
-            if not user.location:
-                messages.info(request, 'Please add your location to continue.')
-                return redirect('profile-edit', pk=user.pk)
-            return redirect('verification_required')
+        return _complete_google_identity_login(request, userinfo, action=request.session.get('oauth_action'))
 
     except SSLError as e:
         logger.warning("Google callback SSL error during OAuth exchange: %s", e, exc_info=True)
@@ -975,6 +1028,73 @@ def google_callback(request):
     except Exception as e:
         logger.error(f"Google callback error: {str(e)}")
         return _redirect_after_google_error(request)
+
+
+@require_http_methods(["POST"])
+def google_native_signin(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse({'success': False, 'message': 'Invalid Google sign-in payload.'}, status=400)
+
+    id_token = (payload.get('id_token') or '').strip()
+    action = (payload.get('action') or 'register').strip().lower()
+    if action not in {'register', 'connect'}:
+        action = 'register'
+
+    if not id_token:
+        return JsonResponse({'success': False, 'message': 'Google sign-in token was not provided.'}, status=400)
+
+    if action == 'connect' and not request.user.is_authenticated:
+        return JsonResponse({'success': False, 'message': 'You need to sign in before connecting Google.'}, status=403)
+
+    try:
+        allowed_audiences = {
+            value for value in [
+                getattr(settings, 'GOOGLE_ANDROID_CLIENT_ID', ''),
+                getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', ''),
+                os.environ.get('GOOGLE_OAUTH_CLIENT_ID', ''),
+            ] if value
+        }
+
+        session = _build_google_oauth_session()
+        tokeninfo_resp = session.get(
+            'https://oauth2.googleapis.com/tokeninfo',
+            params={'id_token': id_token},
+            timeout=(10, 20),
+        )
+        if tokeninfo_resp.status_code != 200:
+            logger.warning("Native Google sign-in tokeninfo returned %s: %s", tokeninfo_resp.status_code, tokeninfo_resp.text)
+            return JsonResponse({'success': False, 'message': 'Google could not verify this sign-in request.'}, status=400)
+
+        tokeninfo = tokeninfo_resp.json()
+        audience = tokeninfo.get('aud')
+        if allowed_audiences and audience not in allowed_audiences:
+            logger.warning("Native Google sign-in audience mismatch: %s not in %s", audience, allowed_audiences)
+            return JsonResponse({'success': False, 'message': 'This Google sign-in request is not allowed for Baysoko.'}, status=403)
+
+        if tokeninfo.get('email_verified') not in ('true', True):
+            return JsonResponse({'success': False, 'message': 'Please use a Google account with a verified email address.'}, status=400)
+
+        request.session['oauth_action'] = action
+        userinfo = {
+            'id': tokeninfo.get('sub') or tokeninfo.get('user_id'),
+            'sub': tokeninfo.get('sub'),
+            'email': tokeninfo.get('email'),
+            'given_name': tokeninfo.get('given_name', ''),
+            'family_name': tokeninfo.get('family_name', ''),
+            'picture': tokeninfo.get('picture', ''),
+            'name': tokeninfo.get('name', ''),
+        }
+        redirect_response = _complete_google_identity_login(request, userinfo, action=action)
+        redirect_url = getattr(redirect_response, 'url', reverse('home'))
+        return JsonResponse({'success': True, 'redirect_url': redirect_url})
+    except RequestException as e:
+        logger.warning("Native Google sign-in network error: %s", e, exc_info=True)
+        return JsonResponse({'success': False, 'message': 'Google sign-in is temporarily unavailable. Please retry.'}, status=503)
+    except Exception as e:
+        logger.exception("Native Google sign-in failed: %s", e)
+        return JsonResponse({'success': False, 'message': 'Google sign-in could not be completed right now.'}, status=500)
 
 def facebook_login(request):
     try:

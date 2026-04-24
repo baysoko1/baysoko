@@ -162,6 +162,37 @@
         opacity: 0.5;
         cursor: not-allowed;
     }
+    .change-email-panel {
+        margin-top: 1rem;
+        padding: 1rem;
+        border-radius: 18px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.1);
+        text-align: left;
+    }
+    .change-email-panel h6 {
+        margin-bottom: 0.6rem;
+        font-weight: 700;
+    }
+    .change-email-actions {
+        display: flex;
+        gap: 0.6rem;
+        margin-top: 0.7rem;
+        flex-wrap: wrap;
+    }
+    .change-email-input {
+        width: 100%;
+        padding: 0.9rem 1rem;
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+        background: var(--input-bg);
+        color: var(--text-primary);
+        outline: none;
+    }
+    .change-email-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 4px rgba(255,107,53,0.15);
+    }
     @keyframes slideInUp {
         from { opacity: 0; transform: translateY(20px); }
         to { opacity: 1; transform: translateY(0); }
@@ -203,7 +234,7 @@
             <i class="bi bi-envelope-check"></i>
         </div>
         <h3>Verify Your Email</h3>
-        <p>We've sent a 7‑digit code to <strong>{{ user.email }}</strong>. Enter it below to activate your account.</p>
+        <p>We've sent a 7‑digit code to <strong id="currentEmailText">{{ user.email }}</strong>. Enter it below to activate your account.</p>
         <div class="verification-input-wrap">
             <input type="text" class="verification-input" id="verificationCode" maxlength="7" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
             <span class="verification-icon" id="verificationIcon" aria-hidden="true"></span>
@@ -215,6 +246,14 @@
                 {% csrf_token %}
                 <button type="submit" class="resend-btn" id="logoutBtn">Logout</button>
             </form>
+        </div>
+        <div class="change-email-panel">
+            <h6>Wrong email?</h6>
+            <p style="margin-bottom:0.65rem; color:var(--text-secondary);">Update it here and we’ll send a fresh verification code right away.</p>
+            <input type="email" class="change-email-input" id="changeEmailInput" value="{{ user.email }}" autocomplete="email" spellcheck="false">
+            <div class="change-email-actions">
+                <button type="button" class="btn btn-custom btn-primary" id="changeEmailBtn">Change Email</button>
+            </div>
         </div>
         <div id="verificationMessage" style="margin-top:1rem; font-size:0.9rem;"></div>
     </div>
@@ -273,6 +312,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const userId = {{ user.id }};
     const verificationCode = document.getElementById('verificationCode');
     const resendBtn = document.getElementById('resendBtn');
+    const changeEmailBtn = document.getElementById('changeEmailBtn');
+    const changeEmailInput = document.getElementById('changeEmailInput');
+    const currentEmailText = document.getElementById('currentEmailText');
     const timerDisplay = document.getElementById('timerDisplay');
     let timerInterval = null;
     let failedAttempts = 0;
@@ -384,6 +426,57 @@ document.addEventListener('DOMContentLoaded', function() {
             resendBtn.disabled = false;
             console.error('Resend fetch error', err);
             document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">Network error. Try again.</span>`;
+        });
+    });
+
+    changeEmailBtn.addEventListener('click', function() {
+        const newEmail = (changeEmailInput.value || '').trim();
+        if (!newEmail) {
+            document.getElementById('verificationMessage').innerHTML = '<span class="text-danger">Enter an email address first.</span>';
+            changeEmailInput.focus();
+            return;
+        }
+
+        const originalText = changeEmailBtn.innerHTML;
+        changeEmailBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Updating...';
+        changeEmailBtn.disabled = true;
+
+        const formData = new FormData();
+        formData.append('email', newEmail);
+
+        fetch("{% url 'change_verification_email' %}", {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken') || '',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        })
+        .then(async response => {
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw payload;
+            return payload;
+        })
+        .then(data => {
+            changeEmailBtn.innerHTML = originalText;
+            changeEmailBtn.disabled = false;
+            changeEmailInput.value = data.email || newEmail;
+            currentEmailText.textContent = data.email || newEmail;
+            verificationCode.value = '';
+            verificationCode.classList.remove('success', 'error', 'shake');
+            document.getElementById('verificationIcon').innerHTML = '';
+            startResendTimer(45);
+            document.getElementById('verificationMessage').innerHTML = `<span class="text-success">${data.message}</span>`;
+            verificationCode.focus();
+        })
+        .catch(err => {
+            changeEmailBtn.innerHTML = originalText;
+            changeEmailBtn.disabled = false;
+            if (err && err.wait) {
+                startResendTimer(err.wait);
+            }
+            document.getElementById('verificationMessage').innerHTML = `<span class="text-danger">${err.error || 'Unable to change email right now.'}</span>`;
         });
     });
 

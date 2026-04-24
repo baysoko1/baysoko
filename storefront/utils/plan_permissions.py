@@ -20,6 +20,10 @@ class PlanPermissions:
             'api_access': False,
             'custom_domain': False,
             'white_label': False,
+            'seller_ai_assistant': False,
+            'seller_ai_insights': False,
+            'seller_ai_bulk_cleanup': False,
+            'seller_ai_actions': False,
         },
         'basic': {
             'analytics': True,  # Basic analytics only
@@ -30,6 +34,10 @@ class PlanPermissions:
             'api_access': False,
             'custom_domain': False,
             'white_label': False,
+            'seller_ai_assistant': False,
+            'seller_ai_insights': False,
+            'seller_ai_bulk_cleanup': False,
+            'seller_ai_actions': False,
         },
         'premium': {
             'analytics': True,
@@ -40,6 +48,10 @@ class PlanPermissions:
             'api_access': False,
             'custom_domain': False,
             'white_label': False,
+            'seller_ai_assistant': True,
+            'seller_ai_insights': True,
+            'seller_ai_bulk_cleanup': True,
+            'seller_ai_actions': False,
         },
         'enterprise': {
             'analytics': True,
@@ -50,6 +62,10 @@ class PlanPermissions:
             'api_access': True,
             'custom_domain': True,
             'white_label': True,
+            'seller_ai_assistant': True,
+            'seller_ai_insights': True,
+            'seller_ai_bulk_cleanup': True,
+            'seller_ai_actions': True,
         }
     }
 

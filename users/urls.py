@@ -2,7 +2,7 @@
 from django.urls import path, include
 from django.contrib.auth import views as auth_views
 from .views import register, ProfileDetailView, ProfileUpdateView, google_callback, facebook_callback, CustomLoginView, CustomLogoutView
-from .views import oauth_diagnostics, google_login, facebook_login, google_connect, password_reset_send_code, password_reset_verify_code, password_reset_set_password, verification_required
+from .views import oauth_diagnostics, google_login, facebook_login, google_connect, google_native_signin, password_reset_send_code, password_reset_verify_code, password_reset_set_password, verification_required
 from . import views
 from allauth.socialaccount.views import SignupView
 from django.urls import reverse_lazy
@@ -16,6 +16,7 @@ urlpatterns = [
     path('accounts/google/login/', google_login, name='google_login'),
     path('accounts/google/connect/', google_connect, name='google_connect'),
     path('accounts/google/callback/', google_callback, name='google_callback'),
+    path('accounts/google/native-signin/', google_native_signin, name='google_native_signin'),
     path('accounts/facebook/login/', facebook_login, name='facebook_login'),
     path('accounts/facebook/callback/', facebook_callback, name='facebook_callback'),
     
@@ -51,6 +52,7 @@ urlpatterns = [
     path('ajax/password-change/', views.ajax_password_change, name='ajax_password_change'),
     path('verify-email/', views.verify_email, name='verify_email'),
     path('resend-code/', views.resend_code, name='resend_code'),
+    path('change-verification-email/', views.change_verification_email, name='change_verification_email'),
     path('verify-phone/', views.verify_phone, name='verify_phone'),
     path('resend-phone-code/', views.resend_phone_code, name='resend_phone_code'),
     path('verify/', views.verification_required, name='verification_required'),

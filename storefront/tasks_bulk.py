@@ -3,6 +3,7 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 from django.core.files.base import ContentFile
+from django.utils.text import slugify
 import json
 import csv
 from io import StringIO, BytesIO
@@ -11,6 +12,7 @@ from datetime import datetime
 import logging
 from datetime import timedelta
 from django.db.models import Q
+from decimal import Decimal, InvalidOperation
 
 
 logger = logging.getLogger('storefront.bulk')
@@ -43,11 +45,128 @@ from .models import Store
 from listings.models import Listing, Category
 from .models_bulk import BatchJob, ExportJob, ImportTemplate, BulkOperationLog
 from django.core.exceptions import FieldDoesNotExist
-# image fetcher is optional; import safely
+# image helpers are optional; import safely
 try:
-    from .image_fetcher import fetch_and_attach
+    from .image_fetcher import (
+        fetch_and_attach,
+        download_image,
+        validate_image_bytes,
+        save_image_to_listing,
+    )
 except Exception:
     fetch_and_attach = None
+    download_image = None
+    validate_image_bytes = None
+    save_image_to_listing = None
+
+
+JOB_TERMINAL_SUCCESS = {'completed', 'completed_with_errors'}
+
+
+def _complete_job(job, error_count, errors):
+    job.status = 'completed' if error_count == 0 else 'completed_with_errors'
+    job.completed_at = timezone.now()
+    job.errors = errors
+    job.results = {
+        'success_count': job.success_count,
+        'error_count': error_count,
+        'completed_with_errors': error_count > 0,
+    }
+    job.save()
+    return job.status
+
+
+def _normalize_location(value):
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    normalized = raw.lower().replace('-', ' ').replace('_', ' ')
+    for key, label in Listing.HOMABAY_LOCATIONS:
+        if normalized in {key.lower().replace('_', ' '), label.lower()}:
+            return key
+    return None
+
+
+def _normalize_choice(value, choices):
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    normalized = raw.lower().replace('-', ' ').replace('_', ' ')
+    for key, label in choices:
+        if normalized in {key.lower().replace('_', ' '), label.lower()}:
+            return key
+    return None
+
+
+def _parse_decimal(value, default=None):
+    if value in (None, ''):
+        return default
+    try:
+        return Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return default
+
+
+def _parse_image_candidates(data):
+    image_keys = ['image_url', 'image_urls', 'images', 'image', 'main_image']
+    candidates = []
+    for key in image_keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            values = value
+        else:
+            values = str(value).replace('\n', ',').split(',')
+        for candidate in values:
+            candidate = str(candidate).strip()
+            if candidate and candidate.lower().startswith(('http://', 'https://')):
+                candidates.append(candidate)
+    # preserve order while deduplicating
+    seen = set()
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique_candidates.append(candidate)
+    return unique_candidates
+
+
+def _attach_image_urls_to_product(product, image_urls):
+    if not image_urls or download_image is None or validate_image_bytes is None or save_image_to_listing is None:
+        return
+
+    attached_any = False
+    for index, image_url in enumerate(image_urls, start=1):
+        img_bytes = download_image(image_url)
+        if not img_bytes or not validate_image_bytes(img_bytes):
+            continue
+
+        base_name = slugify(product.title)[:50] or f'listing-{product.pk}'
+        extension = image_url.rsplit('.', 1)[-1].split('?')[0].lower() if '.' in image_url.rsplit('/', 1)[-1] else 'jpg'
+        extension = extension if extension in {'jpg', 'jpeg', 'png', 'webp', 'gif'} else 'jpg'
+        filename = f'{base_name}-{index}.{extension}'
+
+        listing_image = save_image_to_listing(product, img_bytes, filename=filename, caption='Imported image')
+        if not listing_image:
+            continue
+
+        if not product.image:
+            try:
+                product.image = listing_image.image
+                product.save(update_fields=['image'])
+            except Exception:
+                logger.exception('Failed to promote imported image to primary listing image for product %s', product.pk)
+
+        attached_any = True
+
+    if not attached_any:
+        raise ValueError('No valid product images could be downloaded from the provided image URLs')
 
 @shared_task(bind=True)
 def process_bulk_update_task(self, job_id):
@@ -194,10 +313,7 @@ def process_bulk_update_task(self, job_id):
                 job.save(update_fields=['processed_items', 'success_count', 'error_count'])
         
         # Update job completion
-        job.status = 'completed' if error_count == 0 else 'completed_with_errors'
-        job.completed_at = timezone.now()
-        job.errors = errors
-        job.save()
+        _complete_job(job, error_count, errors)
         
         logger.info(f"Bulk update job {job_id} completed: {success_count} success, {error_count} errors")
         
@@ -431,10 +547,7 @@ def process_import_task(self, job_id):
             job.save(update_fields=['processed_items', 'success_count', 'error_count'])
         
         # Update job completion
-        job.status = 'completed' if error_count == 0 else 'completed_with_errors'
-        job.completed_at = timezone.now()
-        job.errors = errors
-        job.save()
+        _complete_job(job, error_count, errors)
         
         logger.info(f"Import job {job_id} completed: {success_count} success, {error_count} errors")
         
@@ -514,19 +627,27 @@ def process_product_import_row(store, data, params):
         if not product:
             # Create new product
             product = Listing(store=store, seller=store.owner)
+        existing_related_images = product.images.count() if product.pk else 0
+
+        delivery_choice = _normalize_choice(data.get('delivery_option'), Listing.DELIVERY_OPTIONS)
+        condition_choice = _normalize_choice(data.get('condition'), Listing.CONDITION_CHOICES)
+        location_choice = _normalize_location(data.get('location'))
+        image_urls = _parse_image_candidates(data)
         
         # Update fields
         for field, value in data.items():
             if hasattr(product, field) and value is not None:
                 # Handle special field types
-                if field == 'price' or field == 'stock':
+                if field == 'price':
+                    parsed_price = _parse_decimal(value)
+                    if parsed_price is not None and parsed_price >= 0:
+                        product.price = parsed_price
+                elif field == 'stock':
                     try:
-                        # convert to float and guard against NaN/Inf
-                        v = float(value)
-                        if math.isfinite(v):
-                            setattr(product, field, v)
+                        v = int(float(value))
+                        if v >= 0:
+                            product.stock = v
                         else:
-                            # skip invalid numeric values
                             continue
                     except (ValueError, TypeError):
                         continue
@@ -539,6 +660,15 @@ def process_product_import_row(store, data, params):
                     ).first()
                     if category:
                         product.category = category
+                elif field == 'condition':
+                    if condition_choice:
+                        product.condition = condition_choice
+                elif field == 'delivery_option':
+                    if delivery_choice:
+                        product.delivery_option = delivery_choice
+                elif field == 'location':
+                    if location_choice:
+                        product.location = location_choice
                 else:
                     # For string fields, ensure we don't set NaN or other invalid values
                     if isinstance(value, float) and (math.isnan(value) or not math.isfinite(value)):
@@ -555,6 +685,8 @@ def process_product_import_row(store, data, params):
                         setattr(product, field, value)
         
         # Set defaults for required fields
+        if not product.description:
+            product.description = title
         if not product.price:
             product.price = 0
         if product.stock is None:
@@ -564,16 +696,22 @@ def process_product_import_row(store, data, params):
         
         product.save()
 
+        if image_urls:
+            _attach_image_urls_to_product(product, image_urls)
+
         # Auto-fetch images when requested and none exist for this listing
         try:
             auto_fetch = params.get('auto_fetch_images') or params.get('auto_fetch', False)
             if auto_fetch and fetch_and_attach is not None:
                 # ensure there is an images related manager
                 images_rel = getattr(product, 'images', None)
-                has_images = images_rel.count() if images_rel is not None else 0
+                has_images = images_rel.count() if images_rel is not None else existing_related_images
                 if has_images == 0:
                     q = title or data.get('title') or f"{product.title} {store.name}"
-                    fetch_and_attach(product, q)
+                    listing_image = fetch_and_attach(product, q)
+                    if listing_image and not product.image:
+                        product.image = listing_image.image
+                        product.save(update_fields=['image'])
         except Exception as e:
             logger.exception('Auto-fetch images failed for product %s: %s', getattr(product, 'id', None), e)
 

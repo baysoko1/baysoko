@@ -26,7 +26,7 @@
         left: 0;
         right: 0;
         height: 4px;
-        background: linear-gradient(90deg, #4f46e5, #7c3aed);
+        background: linear-gradient(90deg, var(--primary-dark), #7c3aed);
     }
 
     .inventory-title {
@@ -307,6 +307,70 @@
         border-radius: 2px;
     }
 
+    .inventory-copilot {
+        background: linear-gradient(135deg, rgba(7, 59, 76, 0.98) 0%, rgba(17, 138, 178, 0.96) 100%);
+        color: white;
+        border-radius: var(--radius-lg);
+        padding: 24px;
+        box-shadow: var(--shadow-md);
+        margin-bottom: 24px;
+    }
+
+    .inventory-copilot-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 16px;
+    }
+
+    .inventory-copilot h3 {
+        font-size: 1.1rem;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .inventory-copilot p {
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    .inventory-copilot-metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .inventory-copilot-metric,
+    .inventory-copilot-item {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 12px 14px;
+    }
+
+    .inventory-copilot-metric-value {
+        display: block;
+        font-size: 1rem;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+
+    .inventory-copilot-metric-label {
+        font-size: 0.78rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.72);
+    }
+
+    .inventory-copilot-items {
+        display: grid;
+        gap: 10px;
+    }
+
+    @media (max-width: 768px) {
+        .inventory-copilot-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
     /* ===== STOCK MOVEMENTS ===== */
     .movements-card {
         background: var(--card-bg);
@@ -471,7 +535,7 @@
     <!-- Inventory Metrics -->
     <div class="inventory-grid">
         <div class="inventory-card">
-            <div class="inventory-icon" style="background: rgba(79, 70, 229, 0.1); color: #4f46e5;">
+            <div class="inventory-icon" style="background: rgba(255, 107, 53, 0.12); color: var(--primary-dark);">
                 <i class="bi bi-box-seam"></i>
             </div>
             <div class="inventory-value">{{ total_products|intcomma }}</div>
@@ -479,7 +543,7 @@
         </div>
         
         <div class="inventory-card">
-            <div class="inventory-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+            <div class="inventory-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);">
                 <i class="bi bi-exclamation-triangle"></i>
             </div>
             <div class="inventory-value">{{ low_stock_items|intcomma }}</div>
@@ -487,7 +551,7 @@
         </div>
         
         <div class="inventory-card">
-            <div class="inventory-icon" style="background: rgba(239, 68, 68, 0.1); color: #ef4444;">
+            <div class="inventory-icon" style="background: rgba(239, 68, 68, 0.1); color: var(--danger);">
                 <i class="bi bi-x-circle"></i>
             </div>
             <div class="inventory-value">{{ out_of_stock_items|intcomma }}</div>
@@ -495,7 +559,7 @@
         </div>
         
         <div class="inventory-card">
-            <div class="inventory-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+            <div class="inventory-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--success);">
                 <i class="bi bi-currency-dollar"></i>
             </div>
             <div class="inventory-value">KSh {{ stock_value|floatformat:0|intcomma }}</div>
@@ -503,10 +567,41 @@
         </div>
     </div>
 
+    {% if seller_ai %}
+    <section class="inventory-copilot" id="ai-copilot">
+        <div class="inventory-copilot-grid">
+            <div>
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge rounded-pill text-bg-warning">Premium / Enterprise</span>
+                    <span class="small text-white-50">Baysoko AI Copilot</span>
+                </div>
+                <h3>AI inventory guidance for {{ store.name }}</h3>
+                <p>{{ seller_ai.summary }}</p>
+                <div class="inventory-copilot-metrics">
+                    {% for metric in seller_ai.metrics %}
+                    <div class="inventory-copilot-metric">
+                        <span class="inventory-copilot-metric-value">{{ metric.value }}</span>
+                        <span class="inventory-copilot-metric-label">{{ metric.label }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="inventory-copilot-items">
+                {% for priority in seller_ai.priorities %}
+                <div class="inventory-copilot-item">
+                    <strong>{{ priority.title }}</strong>
+                    <p class="mb-0 mt-1">{{ priority.detail }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
     <!-- Quick Actions -->
     <div class="actions-grid">
         <a href="{% url 'storefront:inventory_list' slug=store.slug %}" class="action-card">
-            <div class="action-icon" style="background: #4f46e5;">
+            <div class="action-icon" style="background: var(--primary-dark);">
                 <i class="bi bi-list-ul"></i>
             </div>
             <div class="action-title">View All Products</div>
@@ -514,7 +609,7 @@
         </a>
         
         <a href="{% url 'storefront:inventory_alerts' slug=store.slug %}" class="action-card">
-            <div class="action-icon" style="background: #f59e0b;">
+            <div class="action-icon" style="background: var(--warning);">
                 <i class="bi bi-bell"></i>
             </div>
             <div class="action-title">Manage Alerts</div>
@@ -522,7 +617,7 @@
         </a>
         
         <a href="{% url 'storefront:export_inventory' slug=store.slug %}" class="action-card">
-            <div class="action-icon" style="background: #10b981;">
+            <div class="action-icon" style="background: var(--success);">
                 <i class="bi bi-download"></i>
             </div>
             <div class="action-title">Export to CSV</div>
@@ -530,7 +625,7 @@
         </a>
         
         <a href="{% url 'storefront:import_inventory' slug=store.slug %}" class="action-card">
-            <div class="action-icon" style="background: #3b82f6;">
+            <div class="action-icon" style="background: var(--primary);">
                 <i class="bi bi-upload"></i>
             </div>
             <div class="action-title">Import from CSV</div>

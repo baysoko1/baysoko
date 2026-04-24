@@ -25,6 +25,7 @@ from .forms_inventory import (
 )
 from listings.models import Listing, Category
 from .decorators import store_owner_required, plan_required
+from .ai_copilot import build_seller_copilot_context, has_seller_ai_access
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,8 @@ def inventory_dashboard(request, slug):
         'turnover_rate': round(turnover_rate, 2),
         'recent_movements': recent_movements,
         'category_distribution': category_distribution,
+        'seller_ai': build_seller_copilot_context(request.user, store=store),
+        'seller_ai_access': has_seller_ai_access(request.user, store=store),
     }
     
     return render(request, 'storefront/inventory/dashboard.html', context)
@@ -559,7 +562,7 @@ def import_inventory(request, slug):
             except Exception as exc:
                 logger.exception('Failed to enqueue import job %s: %s — falling back to synchronous run', batch_job.id, exc)
                 try:
-                    process_import_task.apply(args=(batch_job.id,))
+                    process_import_task.run(batch_job.id)
                     messages.success(request, f'Import job #{batch_job.id} was processed synchronously.')
                 except Exception as exc2:
                     logger.exception('Synchronous import job %s failed: %s', batch_job.id, exc2)

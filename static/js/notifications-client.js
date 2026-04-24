@@ -40,6 +40,40 @@
         lastMessageTime: Date.now(),
     };
 
+    function getAndroidBridge() {
+        return window.BaysokoAndroidApp || null;
+    }
+
+    function shouldUseNativeNotification() {
+        return !!getAndroidBridge() && (document.hidden || !document.hasFocus());
+    }
+
+    function notifyNativeApp(payload) {
+        const bridge = getAndroidBridge();
+        if (!bridge || typeof bridge.notify !== 'function' || !shouldUseNativeNotification()) {
+            return;
+        }
+        try {
+            bridge.notify(payload);
+        } catch (error) {
+            console.warn('[Notifications] Native notification bridge failed:', error);
+        }
+    }
+
+    function syncNativeBadges() {
+        const bridge = getAndroidBridge();
+        if (!bridge || typeof bridge.setBadgeCounts !== 'function') {
+            return;
+        }
+        const notifications = parseInt((document.getElementById('dropdownNotificationsBadge') || {}).textContent || '0', 10) || 0;
+        const messages = parseInt((document.getElementById('dropdownMessagesBadge') || {}).textContent || '0', 10) || 0;
+        try {
+            bridge.setBadgeCounts({ notifications, messages });
+        } catch (error) {
+            console.warn('[Notifications] Native badge sync failed:', error);
+        }
+    }
+
     // ==================== WebSocket Connection Management ====================
 
     function connectWebSocket() {
@@ -258,6 +292,13 @@
 
         if (!shown.includes(notification.id)) {
             showNotificationToast(notification);
+            notifyNativeApp({
+                id: `notif-${notification.id}`,
+                title: notification.title || 'Baysoko',
+                body: truncateText(notification.message || '', 120),
+                channelId: 'baysoko-notifications',
+                url: notification.url || '/notifications/',
+            });
             markNotificationShown(notification.id);
         }
     }
@@ -319,6 +360,15 @@
         // Message expected to be { type: 'chat_unread', unread_count: N }
         const count = parseInt(message.unread_count || 0, 10) || 0;
         updateMessagesBadge(count);
+        if (count > 0) {
+            notifyNativeApp({
+                id: `chat-unread-${count}`,
+                title: message.title || 'New message on Baysoko',
+                body: message.message || 'Open your inbox to reply.',
+                channelId: 'baysoko-messages',
+                url: message.url || '/chats/',
+            });
+        }
     }
 
     function handleMarkReadResponse(message) {
@@ -633,6 +683,7 @@
             mobileBadge.textContent = count > 0 ? count : '';
             mobileBadge.style.display = count > 0 ? 'inline-block' : 'none';
         }
+        syncNativeBadges();
     }
 
     function updateMessagesBadge(count) {
@@ -649,6 +700,7 @@
             mobileBadge.textContent = count > 0 ? count : '';
             mobileBadge.style.display = count > 0 ? 'inline-block' : 'none';
         }
+        syncNativeBadges();
     }
 
     function updateConnectionStatus(connected, type = 'websocket') {

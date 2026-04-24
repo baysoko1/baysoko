@@ -1095,6 +1095,11 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
             context['ai_enabled'] = listing_ai.enabled
         except Exception:
             context['ai_enabled'] = False
+        try:
+            from storefront.ai_copilot import has_seller_ai_access
+            context['seller_ai_copilot_access'] = has_seller_ai_access(self.request.user, store=user_store)
+        except Exception:
+            context['seller_ai_copilot_access'] = False
         # Get user's stores for the store selector
         if self.request.user.is_authenticated:
             context['stores'] = user_store
@@ -1323,6 +1328,15 @@ class ListingCreateView(LoginRequiredMixin, CreateView):
         use_ai = request.POST.get('use_ai') in ['on', 'true', '1']
         if use_ai:
             try:
+                from storefront.ai_copilot import has_seller_ai_access
+                candidate_store = None
+                try:
+                    candidate_store = form.cleaned_data.get('store')
+                except Exception:
+                    candidate_store = Store.objects.filter(owner=request.user).first()
+                if not has_seller_ai_access(request.user, store=candidate_store):
+                    messages.warning(request, 'Baysoko AI Copilot for listings is available on Premium and Enterprise plans.')
+                    return super().post(request, *args, **kwargs)
                 # Generate AI suggestions using the form helper
                 ai_data = form.generate_with_ai()
                 # Re-bind a form instance with current POST (mutable copy handled in generate_with_ai)
@@ -1387,6 +1401,11 @@ class ListingUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             context['initial_dynamic_fields'] = self.object.dynamic_fields if getattr(self, 'object', None) and getattr(self.object, 'dynamic_fields', None) else {}
         except Exception:
             context['initial_dynamic_fields'] = {}
+        try:
+            from storefront.ai_copilot import has_seller_ai_access
+            context['seller_ai_copilot_access'] = has_seller_ai_access(self.request.user, store=self.object.store)
+        except Exception:
+            context['seller_ai_copilot_access'] = False
         return context
     
     def get_form_kwargs(self):

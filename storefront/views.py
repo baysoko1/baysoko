@@ -30,6 +30,7 @@ from listings.forms import ListingForm
 from reviews.models import Review
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from .ai_copilot import build_seller_copilot_context, has_seller_ai_access
 
 
 def _broadcast_store_reel_created(video):
@@ -234,6 +235,9 @@ def seller_dashboard(request):
     else:
         store_with_slug = stores.filter(slug__isnull=False).exclude(slug='').first()
 
+    ai_store = store_with_slug or (stores[0] if isinstance(stores, list) and stores else None)
+    seller_ai = build_seller_copilot_context(request.user, store=ai_store)
+
     return render(request, 'storefront/dashboard.html', {
         'stores': stores,
         'total_listings': total_listings,
@@ -245,7 +249,9 @@ def seller_dashboard(request):
         'user_listings': user_listings,
         'store_with_slug': store_with_slug,
         'plan_limits': limits,
-        'plan_status': PlanPermissions.get_user_plan_status(request.user)
+        'plan_status': PlanPermissions.get_user_plan_status(request.user),
+        'seller_ai': seller_ai,
+        'seller_ai_access': has_seller_ai_access(request.user, store=ai_store),
     })
 
 @login_required

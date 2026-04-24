@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.decorators import method_decorator
+from django.urls import reverse
 from datetime import timedelta, datetime
 import json
 import csv
@@ -28,6 +29,10 @@ from .forms_bulk import (
 )
 from listings.models import Listing, Category
 from .decorators import store_owner_required, plan_required
+from .ai_copilot import (
+    has_seller_ai_access,
+    run_bulk_import_preflight,
+)
 
 # Celery tasks will be in tasks.py
 from .tasks_bulk import (
@@ -37,6 +42,24 @@ from .tasks_bulk import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _format_mapping_value(value):
+    if isinstance(value, dict):
+        return [{'type': 'pair', 'label': str(k).replace('_', ' ').title(), 'value': v} for k, v in value.items()]
+    if isinstance(value, list):
+        return [{'type': 'item', 'value': item} for item in value]
+    return value
+
+
+def _build_parameter_display(parameters):
+    display = []
+    for key, value in (parameters or {}).items():
+        display.append({
+            'label': str(key).replace('_', ' ').title(),
+            'value': _format_mapping_value(value),
+        })
+    return display
 
 @login_required
 @store_owner_required
@@ -51,7 +74,7 @@ def bulk_operations_dashboard(request, slug):
         recent_jobs = BatchJob.objects.filter(store=store).select_related('created_by').order_by('-created_at')[:10]
         job_stats = {
             'total': BatchJob.objects.filter(store=store).count(),
-            'completed': BatchJob.objects.filter(store=store, status='completed').count(),
+            'completed': BatchJob.objects.filter(store=store, status__in=['completed', 'completed_with_errors']).count(),
             'processing': BatchJob.objects.filter(store=store, status='processing').count(),
             'failed': BatchJob.objects.filter(store=store, status='failed').count(),
         }
@@ -135,6 +158,7 @@ def bulk_import_data(request, slug):
                 'update_existing': form.cleaned_data['update_existing'],
                 'create_new': form.cleaned_data['create_new'],
                 'skip_errors': form.cleaned_data['skip_errors'],
+                'auto_fetch_images': request.POST.get('auto_fetch_images') in ['on', 'true', '1'],
                 'template_id': form.cleaned_data['template'].id if form.cleaned_data['template'] else None,
             }
 
@@ -159,8 +183,8 @@ def bulk_import_data(request, slug):
                 # If broker unavailable, fall back to synchronous execution so import still works
                 logger.exception('Failed to enqueue import job %s: %s — falling back to synchronous run', batch_job.id, exc)
                 try:
-                    # Run the task synchronously in-process (may block request for duration)
-                    process_import_task.apply(args=(batch_job.id,))
+                    # Run the task synchronously in-process without touching Celery result backends.
+                    process_import_task.run(batch_job.id)
                     messages.success(
                         request,
                         f'Import job #{batch_job.id} was processed synchronously.'
@@ -183,9 +207,40 @@ def bulk_import_data(request, slug):
         'store': store,
         'form': form,
         'templates': templates,
+        'seller_ai_access': has_seller_ai_access(request.user, store=store),
     }
     
     return render(request, 'storefront/bulk/import_data.html', context)
+
+
+@login_required
+@require_POST
+@store_owner_required
+@plan_required('bulk_operations')
+def ai_bulk_import_preflight(request, slug):
+    """Analyze an uploaded import file and return cleanup guidance for sellers."""
+    store = get_object_or_404(Store, slug=slug, owner=request.user)
+
+    if not has_seller_ai_access(request.user, store=store):
+        return JsonResponse({
+            'success': False,
+            'error': 'Baysoko AI Copilot for bulk uploads is available on Premium and Enterprise plans.',
+            'upgrade_url': reverse('storefront:subscription_manage', kwargs={'slug': store.slug}),
+        }, status=403)
+
+    uploaded_file = request.FILES.get('file')
+    if not uploaded_file:
+        return JsonResponse({'success': False, 'error': 'Please choose a file first.'}, status=400)
+
+    try:
+        result = run_bulk_import_preflight(uploaded_file)
+        return JsonResponse({'success': True, 'result': result})
+    except Exception as exc:
+        logger.exception('AI bulk import preflight failed for store %s: %s', store.id, exc)
+        return JsonResponse({
+            'success': False,
+            'error': f'We could not analyze this file yet: {exc}',
+        }, status=400)
 
 @login_required
 @store_owner_required
@@ -323,6 +378,7 @@ def bulk_job_detail(request, slug, job_id):
         'store': store,
         'job': job,
         'logs_page': logs_page,
+        'job_parameter_rows': _build_parameter_display(job.parameters),
     }
     
     return render(request, 'storefront/bulk/job_detail.html', context)
@@ -370,6 +426,7 @@ def export_job_detail(request, slug, job_id):
     context = {
         'store': store,
         'job': job,
+        'filter_rows': _build_parameter_display(job.filters),
     }
     
     return render(request, 'storefront/bulk/export_detail.html', context)

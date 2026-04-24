@@ -46,6 +46,32 @@
         margin: 0;
     }
 
+    .ai-copilot-banner {
+        background: linear-gradient(135deg, rgba(7, 59, 76, 0.98) 0%, rgba(17, 138, 178, 0.96) 100%);
+        color: white;
+        border-radius: 0.85rem;
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.75rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        align-items: center;
+    }
+
+    .ai-copilot-banner p {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 0.85rem;
+    }
+
+    .ai-copilot-lock {
+        background: rgba(255, 193, 7, 0.14);
+        border: 1px solid rgba(255, 193, 7, 0.26);
+        border-radius: 0.85rem;
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.75rem;
+    }
+
     /* Main container – no forced height */
     .form-container {
         max-width: var(--form-max-width);
@@ -434,6 +460,20 @@
 </div>
 
 <div class="form-container">
+    {% if seller_ai_copilot_access %}
+    <div class="ai-copilot-banner">
+        <div>
+            <div class="small fw-bold mb-1">Baysoko AI Copilot</div>
+            <p>Premium and Enterprise sellers get AI-assisted listing suggestions while typing. Start with a strong title and we’ll help fill the rest.</p>
+        </div>
+        <span class="badge bg-warning text-dark">Enabled</span>
+    </div>
+    {% else %}
+    <div class="ai-copilot-lock">
+        <div class="small fw-bold mb-1">Baysoko AI Copilot</div>
+        <div class="text-muted">AI listing assistance is available on Premium and Enterprise plans.</div>
+    </div>
+    {% endif %}
     <!-- Progress Steps -->
     <div class="progress-card">
         <div class="step active" data-step="1">
@@ -1391,6 +1431,7 @@ document.addEventListener('DOMContentLoaded', function() {
     showStep(1);
 });
 </script>
+{% if seller_ai_copilot_access %}
 <script>
 // Auto-suggest integration with ws/agent/ for creative listing suggestions
 (function(){
@@ -1522,6 +1563,7 @@ document.addEventListener('DOMContentLoaded', function() {
     titleEl.addEventListener('blur', function(){ const title = (titleEl.value||'').trim(); if(title.length>3) sendGenerate(title); });
 })();
 </script>
+{% endif %}
  {{ location_choices|json_script:"listingLocationChoices" }} 
 <script>
 document.addEventListener('DOMContentLoaded', function() {

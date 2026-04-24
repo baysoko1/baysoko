@@ -27,11 +27,13 @@
         height: 4px;
         background: linear-gradient(90deg, 
             {% if job.status == 'completed' %}#28a745
-            {% elif job.status == 'processing' %}#ffc107
+            {% elif job.status == 'processing' %}var(--warning)
+            {% elif job.status == 'completed_with_errors' %}var(--warning)
             {% elif job.status == 'failed' %}#dc3545
             {% else %}#6c757d{% endif %}, 
             {% if job.status == 'completed' %}#20c997
-            {% elif job.status == 'processing' %}#fd7e14
+            {% elif job.status == 'processing' %}var(--primary)
+            {% elif job.status == 'completed_with_errors' %}var(--primary)
             {% elif job.status == 'failed' %}#c82333
             {% else %}#adb5bd{% endif %});
     }
@@ -277,6 +279,12 @@
         background: rgba(220, 53, 69, 0.1);
         color: #dc3545;
     }
+
+    .badge-warning {
+        background: rgba(255, 107, 53, 0.12);
+        color: var(--primary);
+        border: 1px solid rgba(255, 107, 53, 0.22);
+    }
     
     .log-content {
         flex: 1;
@@ -320,6 +328,8 @@
                             <span class="job-badge badge-completed">{{ job.get_status_display }}</span>
                             {% elif job.status == 'processing' %}
                             <span class="job-badge badge-processing">{{ job.get_status_display }}</span>
+                            {% elif job.status == 'completed_with_errors' %}
+                            <span class="job-badge badge-warning">{{ job.get_status_display }}</span>
                             {% elif job.status == 'failed' %}
                             <span class="job-badge badge-failed">{{ job.get_status_display }}</span>
                             {% else %}
@@ -396,6 +406,7 @@
             <div class="progress-large">
                 <div class="progress-bar-large 
                     {% if job.status == 'completed' %}progress-success
+                    {% elif job.status == 'completed_with_errors' %}progress-warning
                     {% elif job.status == 'processing' %}progress-warning
                     {% elif job.status == 'failed' %}progress-danger
                     {% else %}progress-info{% endif %}" 
@@ -458,12 +469,13 @@
                 
                 {% if job.completed_at %}
                 <div class="timeline-item">
-                    <div class="timeline-icon {% if job.status == 'completed' %}bg-success text-white{% elif job.status == 'failed' %}bg-danger text-white{% else %}bg-secondary text-white{% endif %}">
-                        <i class="bi {% if job.status == 'completed' %}bi-check-circle{% elif job.status == 'failed' %}bi-x-circle{% else %}bi-slash-circle{% endif %}"></i>
+                        <div class="timeline-icon {% if job.status == 'completed' %}bg-success text-white{% elif job.status == 'completed_with_errors' %}bg-warning text-dark{% elif job.status == 'failed' %}bg-danger text-white{% else %}bg-secondary text-white{% endif %}">
+                        <i class="bi {% if job.status == 'completed' %}bi-check-circle{% elif job.status == 'completed_with_errors' %}bi-exclamation-circle{% elif job.status == 'failed' %}bi-x-circle{% else %}bi-slash-circle{% endif %}"></i>
                     </div>
                     <div class="timeline-content">
                         <h5 class="timeline-title">
                             {% if job.status == 'completed' %}Job Completed Successfully
+                            {% elif job.status == 'completed_with_errors' %}Job Completed With Errors
                             {% elif job.status == 'failed' %}Job Failed
                             {% elif job.status == 'cancelled' %}Job Cancelled
                             {% else %}Job Completed{% endif %}
@@ -472,6 +484,8 @@
                         <p class="timeline-desc">
                             {% if job.status == 'completed' %}
                             Successfully processed {{ job.success_count }} items
+                            {% elif job.status == 'completed_with_errors' %}
+                            Processed {{ job.success_count }} items with {{ job.error_count }} errors
                             {% elif job.status == 'failed' %}
                             Failed with {{ job.error_count }} errors
                             {% endif %}
@@ -486,18 +500,20 @@
             <div class="parameters-card">
                 <h4 class="mb-4">Job Parameters</h4>
                 <div class="parameters-grid">
-                    {% for key, value in job.parameters.items %}
+                    {% for row in job_parameter_rows %}
                     <div class="parameter-item">
-                        <div class="parameter-label">{{ key|title }}</div>
+                        <div class="parameter-label">{{ row.label }}</div>
                         <div class="parameter-value">
-                            {% if value|isinstance:'list' %}
-                            {{ value|join:", " }}
-                            {% elif value|isinstance:'dict' %}
-                            {% for k, v in value.items %}
-                            {{ k }}: {{ v }}{% if not forloop.last %}<br>{% endif %}
+                            {% if row.value.0.type %}
+                            {% for item in row.value %}
+                                {% if item.type == 'pair' %}
+                                <div><strong>{{ item.label }}:</strong> {{ item.value }}</div>
+                                {% else %}
+                                <div>{{ item.value }}</div>
+                                {% endif %}
                             {% endfor %}
                             {% else %}
-                            {{ value }}
+                            {{ row.value }}
                             {% endif %}
                         </div>
                     </div>

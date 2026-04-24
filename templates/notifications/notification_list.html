@@ -39,6 +39,41 @@
         }
     }
 
+    body.android-shell .notifications-container {
+        background: linear-gradient(180deg, rgba(15,17,21,.98) 0%, rgba(17,24,39,.96) 100%);
+        border: none;
+        box-shadow: 0 18px 42px rgba(0,0,0,.22);
+        overflow: clip;
+    }
+
+    body.android-shell .notifications-header {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: linear-gradient(180deg, rgba(255,107,53,.12) 0%, rgba(15,17,21,.96) 82%);
+        backdrop-filter: blur(18px);
+    }
+
+    body.android-shell .notification-item {
+        border-radius: 24px;
+        border: 1px solid rgba(255,255,255,.06);
+        background: linear-gradient(180deg, rgba(28,36,49,.98) 0%, rgba(18,24,35,.98) 100%);
+        box-shadow: 0 14px 28px rgba(0,0,0,.16);
+        margin-bottom: 14px;
+    }
+
+    body.android-shell .notification-item.unread {
+        border-color: rgba(255,107,53,.28);
+        box-shadow: 0 18px 34px rgba(255,107,53,.10);
+    }
+
+    body.android-shell .empty-notifications {
+        background: linear-gradient(180deg, rgba(28,36,49,.98) 0%, rgba(18,24,35,.98) 100%);
+        border-radius: 28px;
+        border: 1px solid rgba(255,255,255,.06);
+        box-shadow: 0 14px 28px rgba(0,0,0,.16);
+    }
+
     /* ===== NOTIFICATIONS HEADER ===== */
     .notifications-header {
         padding: var(--spacing-lg);

@@ -67,6 +67,13 @@ def onesignal_config(request) -> Dict[str, str]:
 		return {
 			'ONESIGNAL_APP_ID': getattr(settings, 'ONESIGNAL_APP_ID', ''),
 			'GOOGLE_MAPS_API_KEY': getattr(settings, 'GOOGLE_MAPS_API_KEY', ''),
+			'GOOGLE_OAUTH_CLIENT_ID': getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', ''),
+			'GOOGLE_ANDROID_CLIENT_ID': getattr(settings, 'GOOGLE_ANDROID_CLIENT_ID', ''),
 		}
 	except Exception:
-		return {'ONESIGNAL_APP_ID': '', 'GOOGLE_MAPS_API_KEY': ''}
+		return {
+			'ONESIGNAL_APP_ID': '',
+			'GOOGLE_MAPS_API_KEY': '',
+			'GOOGLE_OAUTH_CLIENT_ID': '',
+			'GOOGLE_ANDROID_CLIENT_ID': '',
+		}

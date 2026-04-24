@@ -117,6 +117,14 @@
             padding-bottom: max(10px, env(safe-area-inset-bottom));
             background: rgba(15, 17, 21, 0.96);
             backdrop-filter: blur(18px);
+            transition: transform 0.22s ease, opacity 0.22s ease;
+        }
+        body.android-shell.android-keyboard-open .mobile-bottom-nav,
+        body.android-shell.android-keyboard-open .bottom-navbar,
+        body.android-shell.android-keyboard-open .delivery-bottom-nav {
+            transform: translateY(120%);
+            opacity: 0;
+            pointer-events: none;
         }
         body.android-shell .chat-widget,
         body.android-shell .chat-toggle,
@@ -124,12 +132,103 @@
         body.android-shell .floating-action-btn {
             bottom: calc(16px + var(--android-safe-bottom, 0px));
         }
+        body.android-shell.android-keyboard-open .chat-widget,
+        body.android-shell.android-keyboard-open .chat-toggle,
+        body.android-shell.android-keyboard-open .floating-chat-btn,
+        body.android-shell.android-keyboard-open .floating-action-btn {
+            opacity: 0;
+            pointer-events: none;
+        }
         body.android-shell input,
         body.android-shell select,
         body.android-shell textarea,
         body.android-shell button,
         body.android-shell a {
             touch-action: manipulation;
+        }
+        body.android-shell .main-content,
+        body.android-shell .container,
+        body.android-shell .modal-card,
+        body.android-shell .card,
+        body.android-shell form {
+            scroll-margin-top: calc(var(--android-safe-top, 0px) + 88px);
+        }
+        body.android-shell .android-native-file-input {
+            border-radius: 18px;
+        }
+        body.android-shell .android-native-share {
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        body.android-shell .android-native-share:active {
+            transform: scale(0.96);
+            box-shadow: 0 10px 24px rgba(255,107,53,0.18);
+        }
+        body.android-shell .android-native-input-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        body.android-shell .android-native-input-actions .android-native-pill {
+            border: none;
+            border-radius: 999px;
+            padding: 10px 16px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #fff;
+            background: linear-gradient(135deg, #ff6b35 0%, #e55a2b 100%);
+            box-shadow: 0 10px 22px rgba(255, 107, 53, 0.22);
+        }
+        body.android-shell .android-native-input-actions .android-native-pill.secondary {
+            background: rgba(255,255,255,.08);
+            color: #e5e7eb;
+            box-shadow: none;
+            border: 1px solid rgba(255,255,255,.08);
+        }
+        body.android-shell .android-native-offline-banner {
+            position: fixed;
+            left: 16px;
+            right: 16px;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+            z-index: 11000;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 16px;
+            border-radius: 18px;
+            background: rgba(15, 23, 42, 0.94);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,.08);
+            box-shadow: 0 18px 36px rgba(0,0,0,.28);
+            transform: translateY(140%);
+            opacity: 0;
+            pointer-events: none;
+            transition: transform .24s ease, opacity .24s ease;
+        }
+        body.android-shell .android-native-offline-banner.visible {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        body.android-shell .android-native-offline-banner__icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            background: rgba(255,107,53,.16);
+            color: #ffb39a;
+            font-size: 1rem;
+            flex: 0 0 auto;
+        }
+        body.android-shell .android-native-offline-banner__title {
+            font-weight: 700;
+            font-size: .95rem;
+            margin-bottom: 2px;
+        }
+        body.android-shell .android-native-offline-banner__text {
+            font-size: .83rem;
+            color: rgba(255,255,255,.72);
+            line-height: 1.35;
         }
         body.android-shell a[target="_blank"][href*="baysoko.up.railway.app"] {
             target-name: current;
@@ -3997,7 +4096,341 @@
                 if (banner) banner.classList.add('hidden');
                 document.documentElement.classList.add('android-shell');
                 document.body.classList.add('android-shell');
+                const cap = window.Capacitor || null;
+                const browserPlugin = cap?.Plugins?.Browser;
+                const appPlugin = cap?.Plugins?.App;
+                const networkPlugin = cap?.Plugins?.Network;
+                const cameraPlugin = cap?.Plugins?.Camera;
+                const localNotificationsPlugin = cap?.Plugins?.LocalNotifications;
+                const baysokoNativePlugin = cap?.Plugins?.BaysokoNative;
+                const googleAuthPlugin = (baysokoNativePlugin && typeof baysokoNativePlugin.googleSignIn === 'function')
+                    ? baysokoNativePlugin
+                    : cap?.Plugins?.GoogleAuth;
+                const googleNativeSigninUrl = "{% url 'google_native_signin' %}";
+                const googleClientId = "{{ GOOGLE_ANDROID_CLIENT_ID|escapejs }}";
+                const googleWebClientId = "{{ GOOGLE_OAUTH_CLIENT_ID|escapejs }}";
+                const googlePreferredClientId = googleWebClientId || googleClientId;
+
+                const getCsrfToken = () => {
+                    const match = document.cookie.match(/csrftoken=([^;]+)/);
+                    return match ? decodeURIComponent(match[1]) : '';
+                };
+
+                const showOfflineBanner = (() => {
+                    let bannerEl = null;
+                    let onlineTimer = null;
+                    return function(isOnline) {
+                        if (!bannerEl) {
+                            bannerEl = document.createElement('div');
+                            bannerEl.className = 'android-native-offline-banner';
+                            bannerEl.innerHTML = `
+                                <div class="android-native-offline-banner__icon"><i class="bi bi-wifi-off"></i></div>
+                                <div>
+                                    <div class="android-native-offline-banner__title">Connection lost</div>
+                                    <div class="android-native-offline-banner__text">Baysoko will keep the current screen open and reconnect automatically.</div>
+                                </div>
+                            `;
+                            document.body.appendChild(bannerEl);
+                        }
+                        clearTimeout(onlineTimer);
+                        if (!isOnline) {
+                            bannerEl.querySelector('.android-native-offline-banner__icon i').className = 'bi bi-wifi-off';
+                            bannerEl.querySelector('.android-native-offline-banner__title').textContent = 'Connection lost';
+                            bannerEl.querySelector('.android-native-offline-banner__text').textContent = 'Baysoko will keep the current screen open and reconnect automatically.';
+                            bannerEl.classList.add('visible');
+                            return;
+                        }
+                        bannerEl.querySelector('.android-native-offline-banner__icon i').className = 'bi bi-wifi';
+                        bannerEl.querySelector('.android-native-offline-banner__title').textContent = 'Back online';
+                        bannerEl.querySelector('.android-native-offline-banner__text').textContent = 'Everything is synced again.';
+                        bannerEl.classList.add('visible');
+                        onlineTimer = setTimeout(() => bannerEl.classList.remove('visible'), 2200);
+                    };
+                })();
+
+                const dataUrlToFile = async (dataUrl, filename) => {
+                    const response = await fetch(dataUrl);
+                    const blob = await response.blob();
+                    return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+                };
+
+                const assignFileToInput = (input, file) => {
+                    const transfer = new DataTransfer();
+                    transfer.items.add(file);
+                    input.files = transfer.files;
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+
+                async function pickNativePhoto(input, source) {
+                    if (!cameraPlugin?.getPhoto) {
+                        input.click();
+                        return;
+                    }
+                    try {
+                        const photo = await cameraPlugin.getPhoto({
+                            source,
+                            resultType: 'dataUrl',
+                            quality: 88,
+                            allowEditing: false,
+                            correctOrientation: true,
+                            saveToGallery: false
+                        });
+                        if (!photo?.dataUrl) return;
+                        const extension = (photo.format || 'jpeg').replace('jpg', 'jpeg');
+                        const file = await dataUrlToFile(photo.dataUrl, `baysoko-${source}.${extension}`);
+                        assignFileToInput(input, file);
+                    } catch (error) {
+                        console.warn('Android native photo picker failed', error);
+                    }
+                }
+
+                function enhanceAndroidFileInputs() {
+                    document.querySelectorAll('input[type="file"]').forEach((input) => {
+                        try {
+                            input.classList.add('android-native-file-input');
+                            if (input.dataset.androidEnhanced === '1') return;
+                            input.dataset.androidEnhanced = '1';
+                            const accept = (input.getAttribute('accept') || '').toLowerCase();
+                            if (!accept.includes('image') || input.hasAttribute('multiple')) {
+                                if (accept.includes('image/*') && !input.hasAttribute('multiple')) {
+                                    input.setAttribute('capture', 'environment');
+                                }
+                                return;
+                            }
+
+                            const actions = document.createElement('div');
+                            actions.className = 'android-native-input-actions';
+                            actions.innerHTML = `
+                                <button type="button" class="android-native-pill" data-source="camera"><i class="bi bi-camera-fill me-1"></i>Camera</button>
+                                <button type="button" class="android-native-pill secondary" data-source="photos"><i class="bi bi-images me-1"></i>Gallery</button>
+                            `;
+                            actions.querySelectorAll('button').forEach((btn) => {
+                                btn.addEventListener('click', (event) => {
+                                    event.preventDefault();
+                                    pickNativePhoto(input, btn.dataset.source);
+                                });
+                            });
+                            input.insertAdjacentElement('afterend', actions);
+                        } catch (e) {}
+                    });
+                }
+
+                async function bootstrapLocalNotifications() {
+                    if (!localNotificationsPlugin) return;
+                    try {
+                        await localNotificationsPlugin.requestPermissions();
+                        if (localNotificationsPlugin.createChannel) {
+                            await localNotificationsPlugin.createChannel({
+                                id: 'baysoko-notifications',
+                                name: 'Baysoko notifications',
+                                importance: 4,
+                                description: 'Marketplace updates, orders, offers and app alerts.',
+                                visibility: 1,
+                                vibration: true,
+                                lights: true,
+                                lightColor: '#FF6B35',
+                            });
+                            await localNotificationsPlugin.createChannel({
+                                id: 'baysoko-messages',
+                                name: 'Baysoko messages',
+                                importance: 5,
+                                description: 'Messages and conversation activity.',
+                                visibility: 1,
+                                vibration: true,
+                                lights: true,
+                                lightColor: '#FF6B35',
+                            });
+                        }
+                        if (!window.__baysokoLocalNotificationsBound && localNotificationsPlugin.addListener) {
+                            window.__baysokoLocalNotificationsBound = true;
+                            localNotificationsPlugin.addListener('localNotificationActionPerformed', (event) => {
+                                const data = event?.notification?.extra || {};
+                                if (data.url) {
+                                    window.location.href = data.url;
+                                }
+                            });
+                        }
+                    } catch (error) {
+                        console.warn('Local notifications bootstrap failed', error);
+                    }
+                }
+
+                async function bootstrapNativeGoogle() {
+                    if (!googlePreferredClientId) return;
+                    if (window.__baysokoNativeGoogleReady) return;
+                    try {
+                        if (!googleAuthPlugin?.initialize) {
+                            window.__baysokoNativeGoogleReady = true;
+                            return;
+                        }
+                        await googleAuthPlugin.initialize({
+                            clientId: googlePreferredClientId,
+                            serverClientId: googleWebClientId || googlePreferredClientId,
+                            scopes: ['profile', 'email'],
+                            grantOfflineAccess: false,
+                        });
+                        window.__baysokoNativeGoogleReady = true;
+                    } catch (error) {
+                        console.warn('Native Google bootstrap failed', error);
+                    }
+                }
+
+                async function performNativeGoogleAuth(action) {
+                    if (!googleAuthPlugin?.signIn) {
+                        return false;
+                    }
+                    try {
+                        await bootstrapNativeGoogle();
+                        const result = googleAuthPlugin?.googleSignIn
+                            ? await googleAuthPlugin.googleSignIn({ clientId: googlePreferredClientId })
+                            : await googleAuthPlugin.signIn();
+                        const idToken =
+                            result?.authentication?.idToken
+                            || result?.idToken
+                            || result?.serverAuthCode
+                            || '';
+                        if (!idToken) {
+                            throw new Error('Google native sign-in did not return an ID token.');
+                        }
+                        const response = await fetch(googleNativeSigninUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': getCsrfToken(),
+                            },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({
+                                action,
+                                id_token: idToken,
+                            }),
+                        });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok || !data?.success) {
+                            throw new Error(data?.message || 'Google sign-in could not be completed.');
+                        }
+                        window.location.href = data.redirect_url || '/';
+                        return true;
+                    } catch (error) {
+                        console.warn('Native Google auth failed', error);
+                        if (window.showToast) {
+                            window.showToast(error?.message || 'Google sign-in could not be completed right now.', 'error', 4000);
+                        }
+                        return false;
+                    }
+                }
+
+                window.BaysokoAndroidApp = {
+                    isShell: true,
+                    notify: async function(payload) {
+                        if (!localNotificationsPlugin?.schedule) return;
+                        try {
+                            await bootstrapLocalNotifications();
+                            const notificationId = Math.abs(String(payload.id || Date.now()).split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0)) % 2147483000;
+                            await localNotificationsPlugin.schedule({
+                                notifications: [{
+                                    id: notificationId,
+                                    title: payload.title || 'Baysoko',
+                                    body: payload.body || '',
+                                    channelId: payload.channelId || 'baysoko-notifications',
+                                    smallIcon: 'ic_stat_baysoko',
+                                    iconColor: '#FF6B35',
+                                    extra: { url: payload.url || '/' }
+                                }]
+                            });
+                        } catch (error) {
+                            console.warn('Local notification delivery failed', error);
+                        }
+                    },
+                    setBadgeCounts: function(counts) {
+                        const total = (parseInt(counts?.notifications || 0, 10) || 0) + (parseInt(counts?.messages || 0, 10) || 0);
+                        document.body.dataset.androidUnreadTotal = String(total);
+                    },
+                    googleSignIn: performNativeGoogleAuth,
+                    enhanceFileInputs: enhanceAndroidFileInputs,
+                    showOfflineState: showOfflineBanner,
+                };
+
+                if (appPlugin?.addListener && !window.__baysokoAppUrlOpenBound) {
+                    window.__baysokoAppUrlOpenBound = true;
+                    appPlugin.addListener('appUrlOpen', ({ url }) => {
+                        if (!url) return;
+                        const normalized = String(url);
+                        if (!normalized.includes('baysoko.up.railway.app')) return;
+                        try { browserPlugin?.close?.(); } catch (e) {}
+                        if (window.location.href !== normalized) {
+                            window.location.href = normalized;
+                        }
+                    });
+                }
+                if (window.visualViewport && !window.__baysokoKeyboardBound) {
+                    window.__baysokoKeyboardBound = true;
+                    const refreshKeyboardState = () => {
+                        const viewport = window.visualViewport;
+                        if (!viewport) return;
+                        const keyboardOpen = (window.innerHeight - viewport.height) > 160;
+                        document.body.classList.toggle('android-keyboard-open', keyboardOpen);
+                    };
+                    window.visualViewport.addEventListener('resize', refreshKeyboardState);
+                    window.visualViewport.addEventListener('scroll', refreshKeyboardState);
+                    document.addEventListener('focusin', (event) => {
+                        const target = event.target;
+                        if (!(target instanceof HTMLElement)) return;
+                        if (!target.matches('input, textarea, select, [contenteditable="true"]')) return;
+                        setTimeout(() => {
+                            try {
+                                target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                            } catch (e) {}
+                        }, 180);
+                    });
+                    refreshKeyboardState();
+                }
+                if (networkPlugin?.getStatus) {
+                    networkPlugin.getStatus().then((status) => {
+                        if (status && status.connected === false) {
+                            showOfflineBanner(false);
+                        }
+                    }).catch(() => {});
+                    if (networkPlugin.addListener && !window.__baysokoNetworkBound) {
+                        window.__baysokoNetworkBound = true;
+                        networkPlugin.addListener('networkStatusChange', (status) => {
+                            showOfflineBanner(!!status?.connected);
+                        });
+                    }
+                }
+                bootstrapLocalNotifications();
+                bootstrapNativeGoogle();
                 document.addEventListener('DOMContentLoaded', function() {
+                    document.querySelectorAll('a[href*="/accounts/google/login/"], a[href*="/accounts/google/connect/"]').forEach((link) => {
+                        try {
+                            const url = new URL(link.href, window.location.origin);
+                            url.searchParams.set('source', 'android_app');
+                            url.searchParams.set('shell', 'capacitor');
+                            link.href = url.toString();
+                            link.dataset.androidOauth = '1';
+                            link.setAttribute('target', '_self');
+                            link.setAttribute('rel', 'noopener');
+                        } catch (e) {}
+                    });
+                    document.querySelectorAll('a[data-android-oauth="1"]').forEach((link) => {
+                        link.addEventListener('click', async (event) => {
+                            event.preventDefault();
+                            const action = link.href.includes('/connect/') ? 'connect' : 'register';
+                            const nativeWorked = await performNativeGoogleAuth(action);
+                            if (nativeWorked) return;
+                            if (!browserPlugin?.open) {
+                                window.location.href = link.href;
+                                return;
+                            }
+                            try {
+                                await browserPlugin.open({
+                                    url: link.href,
+                                    presentationStyle: 'fullscreen'
+                                });
+                            } catch (e) {
+                                window.location.href = link.href;
+                            }
+                        });
+                    });
                     document.querySelectorAll('a[target="_blank"]').forEach((link) => {
                         try {
                             const href = link.getAttribute('href') || '';
@@ -4006,6 +4439,10 @@
                                 link.setAttribute('rel', 'noopener');
                             }
                         } catch (e) {}
+                    });
+                    enhanceAndroidFileInputs();
+                    document.querySelectorAll('[data-action="share"], .reel-share, .social-share-btn, .listing-reel-action').forEach((btn) => {
+                        btn.classList.add('android-native-share');
                     });
                 });
                 return;

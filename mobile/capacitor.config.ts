@@ -28,13 +28,18 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 1200,
-      backgroundColor: '#0f0f10',
+      launchShowDuration: 900,
+      backgroundColor: '#FF6B35',
       showSpinner: false
     },
     StatusBar: {
       style: 'DARK',
-      backgroundColor: '#ff6b35'
+      backgroundColor: '#ff6b35',
+      overlaysWebView: false
+    },
+    LocalNotifications: {
+      smallIcon: 'ic_stat_baysoko',
+      iconColor: '#FF6B35'
     }
   }
 };

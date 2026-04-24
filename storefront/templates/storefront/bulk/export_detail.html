@@ -402,18 +402,24 @@
                     <div class="filter-value">{{ job.get_format_display }}</div>
                 </div>
                 
-                {% if job.filters %}
+                {% if filter_rows %}
                 <div class="filter-item">
                     <div class="filter-label">Filters Applied</div>
                     <div class="filter-value">
-                        {% for key, value in job.filters.items %}
+                        {% for row in filter_rows %}
                         <div class="mb-1">
-                            <small class="text-muted">{{ key|title }}:</small>
+                            <small class="text-muted">{{ row.label }}:</small>
                             <br>
-                            {% if value|isinstance:'list' %}
-                            {{ value|join:", " }}
+                            {% if row.value.0.type %}
+                                {% for item in row.value %}
+                                    {% if item.type == 'pair' %}
+                                    <div><strong>{{ item.label }}:</strong> {{ item.value }}</div>
+                                    {% else %}
+                                    <div>{{ item.value }}</div>
+                                    {% endif %}
+                                {% endfor %}
                             {% else %}
-                            {{ value }}
+                            {{ row.value }}
                             {% endif %}
                         </div>
                         {% endfor %}

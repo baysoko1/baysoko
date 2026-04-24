@@ -25,7 +25,7 @@
         left: 0;
         right: 0;
         height: 4px;
-        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        background: linear-gradient(90deg, var(--primary), var(--warning));
     }
 
     .bulk-title {
@@ -257,6 +257,12 @@
         background: rgba(239, 68, 68, 0.1);
         color: #ef4444;
         border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .badge-warning {
+        background: rgba(255, 107, 53, 0.12);
+        color: var(--primary);
+        border: 1px solid rgba(255, 107, 53, 0.22);
     }
 
     /* ===== TEMPLATES & EXPORTS ===== */
@@ -501,7 +507,7 @@
     <!-- Bulk Metrics -->
     <div class="bulk-grid">
         <div class="bulk-card">
-            <div class="bulk-icon" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6;">
+            <div class="bulk-icon" style="background: rgba(255, 107, 53, 0.12); color: var(--primary);">
                 <i class="bi bi-briefcase"></i>
             </div>
             <div class="bulk-value">{{ job_stats.total|intcomma }}</div>
@@ -509,7 +515,7 @@
         </div>
         
         <div class="bulk-card">
-            <div class="bulk-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+            <div class="bulk-icon" style="background: rgba(6, 214, 160, 0.12); color: var(--success);">
                 <i class="bi bi-check-circle"></i>
             </div>
             <div class="bulk-value">{{ job_stats.completed|intcomma }}</div>
@@ -517,7 +523,7 @@
         </div>
         
         <div class="bulk-card">
-            <div class="bulk-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+            <div class="bulk-icon" style="background: rgba(255, 158, 31, 0.12); color: var(--warning);">
                 <i class="bi bi-clock"></i>
             </div>
             <div class="bulk-value">{{ job_stats.processing|intcomma }}</div>
@@ -525,7 +531,7 @@
         </div>
         
         <div class="bulk-card">
-            <div class="bulk-icon" style="background: rgba(239, 68, 68, 0.1); color: #ef4444;">
+            <div class="bulk-icon" style="background: rgba(239, 71, 111, 0.12); color: var(--danger);">
                 <i class="bi bi-x-circle"></i>
             </div>
             <div class="bulk-value">{{ job_stats.failed|intcomma }}</div>
@@ -536,7 +542,7 @@
     <!-- Quick Actions -->
     <div class="bulk-actions-grid">
         <a href="{% url 'storefront:bulk_update_products' slug=store.slug %}" class="bulk-action-card">
-            <div class="bulk-action-icon" style="background: #3b82f6;">
+            <div class="bulk-action-icon" style="background: linear-gradient(135deg, var(--primary), var(--primary-dark));">
                 <i class="bi bi-pencil-square"></i>
             </div>
             <div class="bulk-action-title">Bulk Update Products</div>
@@ -544,7 +550,7 @@
         </a>
         
         <a href="{% url 'storefront:bulk_import_data' slug=store.slug %}" class="bulk-action-card">
-            <div class="bulk-action-icon" style="background: #10b981;">
+            <div class="bulk-action-icon" style="background: linear-gradient(135deg, var(--success), #0ca678);">
                 <i class="bi bi-upload"></i>
             </div>
             <div class="bulk-action-title">Import from CSV</div>
@@ -552,7 +558,7 @@
         </a>
         
         <a href="{% url 'storefront:export_data' slug=store.slug %}" class="bulk-action-card">
-            <div class="bulk-action-icon" style="background: #8b5cf6;">
+            <div class="bulk-action-icon" style="background: linear-gradient(135deg, var(--info), #0b6c8e);">
                 <i class="bi bi-download"></i>
             </div>
             <div class="bulk-action-title">Export to CSV</div>
@@ -560,7 +566,7 @@
         </a>
         
         <a href="{% url 'storefront:bulk_image_upload' slug=store.slug %}" class="bulk-action-card">
-            <div class="bulk-action-icon" style="background: #f59e0b;">
+            <div class="bulk-action-icon" style="background: linear-gradient(135deg, var(--warning), var(--primary));">
                 <i class="bi bi-images"></i>
             </div>
             <div class="bulk-action-title">Bulk Image Upload</div>
@@ -581,7 +587,7 @@
                 <div class="template-item">
                     <div class="template-header">
                         <span class="template-name">#{{ job.id }} - {{ job.get_job_type_display }}</span>
-                        <span class="job-badge {% if job.status == 'completed' %}badge-completed{% elif job.status == 'processing' %}badge-processing{% elif job.status == 'failed' %}badge-failed{% else %}badge-pending{% endif %}">
+                        <span class="job-badge {% if job.status == 'completed' %}badge-completed{% elif job.status == 'completed_with_errors' %}badge-warning{% elif job.status == 'processing' %}badge-processing{% elif job.status == 'failed' %}badge-failed{% else %}badge-pending{% endif %}">
                             {{ job.get_status_display }}
                         </span>
                     </div>
@@ -595,7 +601,7 @@
                             <span class="progress-value">{{ job.processed_items }}/{{ job.total_items }}</span>
                         </div>
                         <div class="progress-bar-container">
-                            <div class="progress-bar-fill {% if job.status == 'completed' %}bg-success{% elif job.status == 'processing' %}bg-warning{% else %}bg-secondary{% endif %}"
+                            <div class="progress-bar-fill {% if job.status == 'completed' %}bg-success{% elif job.status == 'completed_with_errors' %}bg-warning{% elif job.status == 'processing' %}bg-warning{% else %}bg-secondary{% endif %}"
                                  style="width: {{ job.processed_items|div:job.total_items|mul:100 }}%">
                             </div>
                         </div>
@@ -713,7 +719,7 @@
                             <span class="job-badge badge-pending">{{ job.get_job_type_display }}</span>
                         </td>
                         <td>
-                            <span class="job-badge {% if job.status == 'completed' %}badge-completed{% elif job.status == 'processing' %}badge-processing{% elif job.status == 'failed' %}badge-failed{% else %}badge-pending{% endif %}">
+                            <span class="job-badge {% if job.status == 'completed' %}badge-completed{% elif job.status == 'completed_with_errors' %}badge-warning{% elif job.status == 'processing' %}badge-processing{% elif job.status == 'failed' %}badge-failed{% else %}badge-pending{% endif %}">
                                 {{ job.get_status_display }}
                             </span>
                         </td>
@@ -721,7 +727,7 @@
                             {% if job.total_items > 0 %}
                                 <div class="d-flex align-items-center">
                                     <div class="progress flex-grow-1 mr-2" style="height: 8px;">
-                                        <div class="progress-bar {% if job.status == 'completed' %}bg-success{% elif job.status == 'processing' %}bg-warning{% else %}bg-secondary{% endif %}"
+                                        <div class="progress-bar {% if job.status == 'completed' %}bg-success{% elif job.status == 'completed_with_errors' %}bg-warning{% elif job.status == 'processing' %}bg-warning{% else %}bg-secondary{% endif %}"
                                              role="progressbar"
                                              style="width: {{ job.processed_items|div:job.total_items|mul:100 }}%">
                                         </div>
