@@ -74,12 +74,43 @@ def _preview_records(df: pd.DataFrame, limit: int = 5) -> list[dict]:
     return [{str(k): str(v)[:120] for k, v in row.items()} for row in records]
 
 
+def _detect_encoding(raw_bytes: bytes) -> str:
+    """Detect the character encoding of raw bytes.
+
+    Tries chardet first for accurate detection, then falls back to probing
+    common encodings in order of prevalence so that CSV files exported from
+    Excel (Latin-1 / Windows-1252) are handled gracefully even when chardet
+    is not installed.
+    """
+    try:
+        import chardet
+
+        result = chardet.detect(raw_bytes)
+        encoding = (result.get("encoding") or "").strip()
+        if encoding:
+            return encoding
+    except ImportError:
+        pass
+
+    # Fallback: probe common encodings in order of prevalence.
+    for candidate in ("utf-8-sig", "utf-8", "latin-1", "windows-1252", "cp1250"):
+        try:
+            raw_bytes.decode(candidate)
+            return candidate
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    # Last resort — latin-1 accepts every byte value, so it never raises.
+    return "latin-1"
+
+
 def _coerce_frame(uploaded_file) -> pd.DataFrame:
     filename = (uploaded_file.name or "").lower()
     raw_bytes = uploaded_file.read()
     uploaded_file.seek(0)
     if filename.endswith(".csv"):
-        return pd.read_csv(BytesIO(raw_bytes))
+        encoding = _detect_encoding(raw_bytes)
+        return pd.read_csv(BytesIO(raw_bytes), encoding=encoding)
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
         return pd.read_excel(BytesIO(raw_bytes))
     raise ValueError("Unsupported file format. Please upload CSV or Excel.")
