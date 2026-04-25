@@ -73,6 +73,70 @@ def _detect_encoding(raw_bytes: bytes) -> str:
     return "latin-1"
 
 
+def _looks_like_serialized_csv_row(cells):
+    if len(cells) != 1:
+        return False
+    raw = str(cells[0] or '').strip()
+    return raw.count(',') >= 3 and '"' in raw
+
+
+def _split_serialized_csv_row(raw_value):
+    return [str(cell).strip() for cell in next(csv.reader([raw_value]))]
+
+
+def _pad_row(row, width):
+    if len(row) < width:
+        return row + [''] * (width - len(row))
+    return row[:width]
+
+
+def _normalize_tabular_rows(rows):
+    if not rows:
+        return [], []
+
+    headers = [str(cell).strip() for cell in rows[0]]
+    width = len(headers)
+    normalized_rows = []
+    header_signature = ''.join(ch for ch in ','.join(headers[: min(5, len(headers))]).lower() if ch.isalnum())
+
+    for raw_row in rows[1:]:
+        row = [str(cell).strip() for cell in raw_row]
+        if _looks_like_serialized_csv_row(row):
+            row = _split_serialized_csv_row(row[0])
+        row = _pad_row(row, width)
+
+        if row:
+            first_signature = ''.join(ch for ch in str(row[0]).lower() if ch.isalnum())
+            if first_signature and first_signature.startswith(header_signature):
+                continue
+
+        if not any(row):
+            continue
+
+        normalized_rows.append(row)
+
+    return headers, normalized_rows
+
+
+def _load_csv_rows(file_content, job_id=None):
+    detected_enc = _detect_encoding(file_content)
+    logger.info('Import job %s: detected CSV encoding %s', job_id, detected_enc)
+    try:
+        text = file_content.decode(detected_enc)
+    except (UnicodeDecodeError, LookupError):
+        logger.warning(
+            'Import job %s: could not decode with %s, falling back to latin-1',
+            job_id, detected_enc,
+        )
+        text = file_content.decode('latin-1', errors='replace')
+
+    raw_rows = list(csv.reader(StringIO(text)))
+    headers, rows = _normalize_tabular_rows(raw_rows)
+    if not headers:
+        return []
+    return [dict(zip(headers, row)) for row in rows]
+
+
 from .models import Store
 from listings.models import Listing, Category
 from .models_bulk import BatchJob, ExportJob, ImportTemplate, BulkOperationLog
@@ -122,6 +186,9 @@ def _normalize_location(value):
     for key, label in Listing.HOMABAY_LOCATIONS:
         if normalized in {key.lower().replace('_', ' '), label.lower()}:
             return key
+        label_tokens = [token for token in label.lower().replace('-', ' ').split() if len(token) > 3]
+        if any(token in normalized for token in label_tokens):
+            return key
     return None
 
 
@@ -134,6 +201,8 @@ def _normalize_choice(value, choices):
     normalized = raw.lower().replace('-', ' ').replace('_', ' ')
     for key, label in choices:
         if normalized in {key.lower().replace('_', ' '), label.lower()}:
+            return key
+        if normalized.startswith(key.lower()) or normalized.startswith(label.lower()):
             return key
     return None
 
@@ -423,54 +492,16 @@ def process_import_task(self, job_id):
         # Load rows depending on file type; prefer pandas but fall back for CSV
         rows = []
         if file_ext == 'csv':
-            # Detect encoding once using the shared helper so both the pandas
-            # and stdlib csv paths benefit from chardet + probe fallback.
-            detected_enc = _detect_encoding(file_content)
-            logger.info('Import job %s: detected CSV encoding %s', job_id, detected_enc)
-
-            if pd is not None:
-                # Decode with the detected encoding; fall back to replacement
-                # characters only as a last resort so we never hard-crash.
-                try:
-                    text = file_content.decode(detected_enc)
-                except (UnicodeDecodeError, LookupError):
-                    logger.warning(
-                        'Import job %s: could not decode with %s, falling back to latin-1',
-                        job_id, detected_enc,
-                    )
-                    text = file_content.decode('latin-1', errors='replace')
-
-                try:
-                    df = pd.read_csv(StringIO(text))
-                    rows = [r.to_dict() for _, r in df.iterrows()]
-                except Exception:
-                    # Last resort: parse via stdlib csv module
-                    logger.warning(
-                        'Import job %s: pandas CSV parse failed, falling back to csv.DictReader',
-                        job_id,
-                    )
-                    try:
-                        reader = csv.DictReader(StringIO(text))
-                        rows = list(reader)
-                    except Exception:
-                        rows = []
-            else:
-                # No pandas — use stdlib csv with the detected encoding.
-                try:
-                    text = file_content.decode(detected_enc)
-                except (UnicodeDecodeError, LookupError):
-                    logger.warning(
-                        'Import job %s: could not decode with %s, falling back to latin-1',
-                        job_id, detected_enc,
-                    )
-                    text = file_content.decode('latin-1', errors='replace')
-                reader = csv.DictReader(StringIO(text))
-                rows = list(reader)
+            rows = _load_csv_rows(file_content, job_id=job_id)
         elif file_ext in ['xlsx', 'xls']:
             if pd is None:
                 raise ImportError('pandas is required to process Excel imports')
             df = pd.read_excel(BytesIO(file_content))
-            rows = [r.to_dict() for _, r in df.iterrows()]
+            headers, normalized_rows = _normalize_tabular_rows(
+                [[str(cell or '').strip() for cell in df.columns.tolist()]]
+                + [[str(cell or '').strip() for cell in row] for row in df.values.tolist()]
+            )
+            rows = [dict(zip(headers, row)) for row in normalized_rows]
         else:
             raise ValueError(f"Unsupported file format: {file_ext}")
 
@@ -487,7 +518,11 @@ def process_import_task(self, job_id):
                 'stock': ['stock', 'quantity', 'qty'],
                 'category': ['category', 'cat'],
                 'condition': ['condition'],
-                'tags': ['tags', 'tag']
+                'tags': ['tags', 'tag'],
+                'location': ['location', 'town', 'city'],
+                'is_active': ['is active', 'active', 'enabled', 'published'],
+                'image_url': ['image', 'image_url', 'main image', 'primary image', 'photo'],
+                'image_urls': ['images', 'gallery images', 'additional images'],
             }
             auto_map = {}
             for h in detected_headers:
@@ -678,8 +713,12 @@ def process_product_import_row(store, data, params):
                     category = Category.objects.filter(
                         name__iexact=str(value).strip()
                     ).first()
-                    if category:
-                        product.category = category
+                    if not category:
+                        category, _ = Category.objects.get_or_create(
+                            name=str(value).strip()[:100],
+                            defaults={'is_active': True},
+                        )
+                    product.category = category
                 elif field == 'condition':
                     if condition_choice:
                         product.condition = condition_choice
@@ -711,6 +750,13 @@ def process_product_import_row(store, data, params):
             product.price = 0
         if product.stock is None:
             product.stock = 0
+        if not product.condition:
+            product.condition = 'used'
+        if not product.delivery_option:
+            product.delivery_option = 'pickup'
+        if not product.location:
+            default_location = _normalize_location(getattr(store, 'location', None))
+            product.location = default_location or Listing.HOMABAY_LOCATIONS[0][0]
         if not product.seller:
             product.seller = store.owner
         
