@@ -41,6 +41,38 @@ def _clean_json(obj):
     except Exception:
         return None
 
+def _detect_encoding(raw_bytes: bytes) -> str:
+    """Detect the character encoding of *raw_bytes*.
+
+    Tries chardet first for accurate detection, then falls back to probing
+    common encodings in order of prevalence so that CSV files exported from
+    Excel (Latin-1 / Windows-1252) are handled gracefully even when chardet
+    is not installed.
+    """
+    try:
+        import chardet
+
+        result = chardet.detect(raw_bytes)
+        encoding = (result.get("encoding") or "").strip()
+        if encoding:
+            logger.debug("chardet detected encoding: %s", encoding)
+            return encoding
+    except ImportError:
+        pass
+
+    # Fallback: probe common encodings in order of prevalence.
+    for candidate in ("utf-8-sig", "utf-8", "latin-1", "windows-1252", "cp1250"):
+        try:
+            raw_bytes.decode(candidate)
+            logger.debug("Probed encoding: %s", candidate)
+            return candidate
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    # Last resort — latin-1 accepts every byte value, so it never raises.
+    return "latin-1"
+
+
 from .models import Store
 from listings.models import Listing, Category
 from .models_bulk import BatchJob, ExportJob, ImportTemplate, BulkOperationLog
@@ -73,6 +105,10 @@ def _complete_job(job, error_count, errors):
         'completed_with_errors': error_count > 0,
     }
     job.save()
+    logger.info(
+        'Job %s: status → %s (success=%s, errors=%s)',
+        job.id, job.status, job.success_count, error_count,
+    )
     return job.status
 
 
@@ -346,7 +382,8 @@ def process_import_task(self, job_id):
         job.status = 'processing'
         job.started_at = timezone.now()
         job.save()
-        
+        logger.info('Import job %s: status → processing', job_id)
+
         params = job.parameters
         template_id = params.get('template_id')
         
@@ -368,12 +405,6 @@ def process_import_task(self, job_id):
         except Exception:
             pd = None
 
-        # Optional charset detector
-        try:
-            import chardet
-        except Exception:
-            chardet = None
-
         # Get field mapping from job parameters (form submits this as JSON) or template
         field_mapping = {}
         try:
@@ -392,60 +423,49 @@ def process_import_task(self, job_id):
         # Load rows depending on file type; prefer pandas but fall back for CSV
         rows = []
         if file_ext == 'csv':
+            # Detect encoding once using the shared helper so both the pandas
+            # and stdlib csv paths benefit from chardet + probe fallback.
+            detected_enc = _detect_encoding(file_content)
+            logger.info('Import job %s: detected CSV encoding %s', job_id, detected_enc)
+
             if pd is not None:
-                # Try reading with pandas; handle encoding issues gracefully
-                df = None
-                # First try direct read (utf-8)
+                # Decode with the detected encoding; fall back to replacement
+                # characters only as a last resort so we never hard-crash.
                 try:
-                    df = pd.read_csv(BytesIO(file_content))
-                except Exception as e:
-                    # Try to detect encoding with chardet
-                    enc = None
-                    if chardet is not None:
-                        try:
-                            det = chardet.detect(file_content)
-                            enc = det.get('encoding')
-                        except Exception:
-                            enc = None
+                    text = file_content.decode(detected_enc)
+                except (UnicodeDecodeError, LookupError):
+                    logger.warning(
+                        'Import job %s: could not decode with %s, falling back to latin-1',
+                        job_id, detected_enc,
+                    )
+                    text = file_content.decode('latin-1', errors='replace')
 
-                    # Try common encodings if detection failed
-                    tried = []
-                    for attempt_enc in filter(None, [enc, 'utf-8', 'latin-1', 'cp1252']):
-                        if attempt_enc in tried:
-                            continue
-                        tried.append(attempt_enc)
-                        try:
-                            text = file_content.decode(attempt_enc)
-                            df = pd.read_csv(StringIO(text))
-                            break
-                        except Exception:
-                            df = None
-
-                if df is None:
-                    # Last resort: decode with replacement and parse via csv module
+                try:
+                    df = pd.read_csv(StringIO(text))
+                    rows = [r.to_dict() for _, r in df.iterrows()]
+                except Exception:
+                    # Last resort: parse via stdlib csv module
+                    logger.warning(
+                        'Import job %s: pandas CSV parse failed, falling back to csv.DictReader',
+                        job_id,
+                    )
                     try:
-                        text = file_content.decode('utf-8', errors='replace')
                         reader = csv.DictReader(StringIO(text))
-                        rows = [r for r in reader]
+                        rows = list(reader)
                     except Exception:
                         rows = []
-                else:
-                    rows = [r.to_dict() for _, r in df.iterrows()]
             else:
+                # No pandas — use stdlib csv with the detected encoding.
                 try:
-                    text = file_content.decode('utf-8')
-                except Exception:
-                    # try chardet or latin-1
-                    if chardet is not None:
-                        try:
-                            enc = chardet.detect(file_content).get('encoding')
-                            text = file_content.decode(enc or 'latin-1', errors='replace')
-                        except Exception:
-                            text = file_content.decode('latin-1', errors='replace')
-                    else:
-                        text = file_content.decode('latin-1', errors='replace')
+                    text = file_content.decode(detected_enc)
+                except (UnicodeDecodeError, LookupError):
+                    logger.warning(
+                        'Import job %s: could not decode with %s, falling back to latin-1',
+                        job_id, detected_enc,
+                    )
+                    text = file_content.decode('latin-1', errors='replace')
                 reader = csv.DictReader(StringIO(text))
-                rows = [r for r in reader]
+                rows = list(reader)
         elif file_ext in ['xlsx', 'xls']:
             if pd is None:
                 raise ImportError('pandas is required to process Excel imports')

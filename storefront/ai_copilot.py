@@ -69,11 +69,52 @@ def _guess_import_field(column_name: str) -> str:
     return ""
 
 
+<<<<<<< HEAD
 def _coerce_table(uploaded_file) -> tuple[list[str], list[list[str]]]:
+=======
+def _preview_records(df: pd.DataFrame, limit: int = 5) -> list[dict]:
+    safe = df.head(limit).fillna("")
+    records = safe.to_dict(orient="records")
+    return [{str(k): str(v)[:120] for k, v in row.items()} for row in records]
+
+
+def _detect_encoding(raw_bytes: bytes) -> str:
+    """Detect the character encoding of raw bytes.
+
+    Tries chardet first for accurate detection, then falls back to probing
+    common encodings in order of prevalence so that CSV files exported from
+    Excel (Latin-1 / Windows-1252) are handled gracefully even when chardet
+    is not installed.
+    """
+    try:
+        import chardet
+
+        result = chardet.detect(raw_bytes)
+        encoding = (result.get("encoding") or "").strip()
+        if encoding:
+            return encoding
+    except ImportError:
+        pass
+
+    # Fallback: probe common encodings in order of prevalence.
+    for candidate in ("utf-8-sig", "utf-8", "latin-1", "windows-1252", "cp1250"):
+        try:
+            raw_bytes.decode(candidate)
+            return candidate
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    # Last resort — latin-1 accepts every byte value, so it never raises.
+    return "latin-1"
+
+
+def _coerce_frame(uploaded_file) -> pd.DataFrame:
+>>>>>>> 61f156b2678c76cd8bc4c2a5c35630d38e2d436a
     filename = (uploaded_file.name or "").lower()
     raw_bytes = uploaded_file.read()
     uploaded_file.seek(0)
     if filename.endswith(".csv"):
+<<<<<<< HEAD
         decoded = raw_bytes.decode("utf-8-sig", errors="replace")
         rows = list(csv.reader(decoded.splitlines()))
         if not rows:
@@ -81,6 +122,10 @@ def _coerce_table(uploaded_file) -> tuple[list[str], list[list[str]]]:
         headers = [str(cell).strip() for cell in rows[0]]
         data_rows = [[str(cell).strip() for cell in row] for row in rows[1:]]
         return headers, data_rows
+=======
+        encoding = _detect_encoding(raw_bytes)
+        return pd.read_csv(BytesIO(raw_bytes), encoding=encoding)
+>>>>>>> 61f156b2678c76cd8bc4c2a5c35630d38e2d436a
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
         try:
             from openpyxl import load_workbook
