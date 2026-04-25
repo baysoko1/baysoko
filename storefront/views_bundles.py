@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.http import require_POST, require_GET
 from django.db.models import Q, Count, Sum, F, Value, CharField
-from django.db import transaction
+from django.db import transaction, DatabaseError, OperationalError, ProgrammingError
 from django.core.paginator import Paginator
 from django.utils import timezone
 from django.views import View
@@ -14,11 +14,11 @@ from datetime import timedelta, datetime
 import json
 
 from .models import Store
-from django.db import OperationalError
 from .models_bundles import (
     ProductBundle, BundleItem, BundleRule, 
     UpsellProduct, ProductTemplate
 )
+from .utils.db import safe_db_query
 from .forms_bundles import (
     ProductBundleForm, BundleItemForm, BundleRuleForm,
     UpsellProductForm, ProductTemplateForm, QuickProductForm
@@ -31,7 +31,8 @@ from .decorators import staff_required, store_owner_required
 def bundle_dashboard(request, slug):
     """Bundle management dashboard"""
     store = get_object_or_404(Store, slug=slug)
-    # Get bundle statistics. Guard DB access in case migrations haven't been applied yet
+    # Get bundle statistics. Guard DB access in case migrations haven't been applied yet.
+    _migrations_missing = False
     try:
         total_bundles = store.bundles.count()
         active_bundles = store.bundles.filter(is_active=True).count()
@@ -45,15 +46,24 @@ def bundle_dashboard(request, slug):
 
         # Get templates
         templates = store.product_templates.filter(is_active=True).count()
-    except OperationalError:
-        # Database tables (e.g. storefront_productbundle) may not exist in some dev/test environments.
-        # Provide safe defaults so the dashboard can render and guide the developer to run migrations.
+    except (DatabaseError, OperationalError, ProgrammingError):
+        # Database tables (e.g. storefront_productbundle) may not exist in some
+        # environments.  Provide safe defaults so the dashboard can still render
+        # and guide the developer to run pending migrations.
         total_bundles = 0
         active_bundles = 0
         featured_bundles = 0
         recent_bundles = []
         active_rules = 0
         templates = 0
+        _migrations_missing = True
+
+    if _migrations_missing:
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
     
     context = {
         'store': store,
@@ -72,49 +82,57 @@ def bundle_dashboard(request, slug):
 def bundle_list(request, slug):
     """List all bundles"""
     store = get_object_or_404(Store, slug=slug)
-    
-    bundles = store.bundles.select_related('category').prefetch_related('items')
-    
-    # Apply filters
-    status = request.GET.get('status')
-    featured = request.GET.get('featured')
-    search = request.GET.get('search')
-    
-    if status == 'active':
-        bundles = bundles.filter(is_active=True)
-    elif status == 'inactive':
-        bundles = bundles.filter(is_active=False)
-    
-    if featured == 'yes':
-        bundles = bundles.filter(featured=True)
-    elif featured == 'no':
-        bundles = bundles.filter(featured=False)
-    
-    if search:
-        bundles = bundles.filter(
-            Q(name__icontains=search) |
-            Q(description__icontains=search) |
-            Q(sku__icontains=search)
+
+    try:
+        bundles = store.bundles.select_related('category').prefetch_related('items')
+
+        # Apply filters
+        status = request.GET.get('status')
+        featured = request.GET.get('featured')
+        search = request.GET.get('search')
+
+        if status == 'active':
+            bundles = bundles.filter(is_active=True)
+        elif status == 'inactive':
+            bundles = bundles.filter(is_active=False)
+
+        if featured == 'yes':
+            bundles = bundles.filter(featured=True)
+        elif featured == 'no':
+            bundles = bundles.filter(featured=False)
+
+        if search:
+            bundles = bundles.filter(
+                Q(name__icontains=search) |
+                Q(description__icontains=search) |
+                Q(sku__icontains=search)
+            )
+
+        # Sorting
+        sort_by = request.GET.get('sort', 'created_at')
+        sort_order = request.GET.get('order', 'desc')
+
+        if sort_by == 'name':
+            bundles = bundles.order_by('name' if sort_order == 'asc' else '-name')
+        elif sort_by == 'price':
+            bundles = bundles.order_by('bundle_price' if sort_order == 'asc' else '-bundle_price')
+        elif sort_by == 'stock':
+            bundles = bundles.order_by('stock' if sort_order == 'asc' else '-stock')
+        else:  # created_at
+            bundles = bundles.order_by('created_at' if sort_order == 'asc' else '-created_at')
+
+        # Pagination
+        paginator = Paginator(bundles, 20)
+        page_number = request.GET.get('page')
+        page_obj = paginator.get_page(page_number)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
         )
-    
-    # Sorting
-    sort_by = request.GET.get('sort', 'created_at')
-    sort_order = request.GET.get('order', 'desc')
-    
-    if sort_by == 'name':
-        bundles = bundles.order_by('name' if sort_order == 'asc' else '-name')
-    elif sort_by == 'price':
-        bundles = bundles.order_by('bundle_price' if sort_order == 'asc' else '-bundle_price')
-    elif sort_by == 'stock':
-        bundles = bundles.order_by('stock' if sort_order == 'asc' else '-stock')
-    else:  # created_at
-        bundles = bundles.order_by('created_at' if sort_order == 'asc' else '-created_at')
-    
-    # Pagination
-    paginator = Paginator(bundles, 20)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'page_obj': page_obj,
@@ -124,7 +142,7 @@ def bundle_list(request, slug):
         'sort_by': sort_by,
         'sort_order': sort_order,
     }
-    
+
     return render(request, 'storefront/bundles/list.html', context)
 
 @login_required
@@ -132,24 +150,32 @@ def bundle_list(request, slug):
 def bundle_create(request, slug):
     """Create a new bundle"""
     store = get_object_or_404(Store, slug=slug)
-    
-    if request.method == 'POST':
-        form = ProductBundleForm(store, request.POST, request.FILES)
-        if form.is_valid():
-            bundle = form.save(commit=False)
-            bundle.store = store
-            bundle.save()
-            
-            messages.success(request, 'Bundle created successfully. Now add products to it.')
-            return redirect('storefront:bundle_items', slug=slug, bundle_id=bundle.id)
-    else:
-        form = ProductBundleForm(store)
-    
+
+    try:
+        if request.method == 'POST':
+            form = ProductBundleForm(store, request.POST, request.FILES)
+            if form.is_valid():
+                bundle = form.save(commit=False)
+                bundle.store = store
+                bundle.save()
+
+                messages.success(request, 'Bundle created successfully. Now add products to it.')
+                return redirect('storefront:bundle_items', slug=slug, bundle_id=bundle.id)
+        else:
+            form = ProductBundleForm(store)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'form': form,
     }
-    
+
     return render(request, 'storefront/bundles/create.html', context)
 
 @login_required
@@ -157,24 +183,33 @@ def bundle_create(request, slug):
 def bundle_edit(request, slug, bundle_id):
     """Edit a bundle"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    
-    if request.method == 'POST':
-        form = ProductBundleForm(store, request.POST, request.FILES, instance=bundle)
-        if form.is_valid():
-            form.save()
-            
-            messages.success(request, 'Bundle updated successfully.')
-            return redirect('storefront:bundle_detail', slug=slug, bundle_id=bundle.id)
-    else:
-        form = ProductBundleForm(store, instance=bundle)
-    
+
+    try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
+
+        if request.method == 'POST':
+            form = ProductBundleForm(store, request.POST, request.FILES, instance=bundle)
+            if form.is_valid():
+                form.save()
+
+                messages.success(request, 'Bundle updated successfully.')
+                return redirect('storefront:bundle_detail', slug=slug, bundle_id=bundle.id)
+        else:
+            form = ProductBundleForm(store, instance=bundle)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'bundle': bundle,
         'form': form,
     }
-    
+
     return render(request, 'storefront/bundles/edit.html', context)
 
 @login_required
@@ -182,16 +217,24 @@ def bundle_edit(request, slug, bundle_id):
 def bundle_detail(request, slug, bundle_id):
     """View bundle details"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    
-    items = bundle.items.select_related('product').order_by('display_order')
-    
+
+    try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
+        items = bundle.items.select_related('product').order_by('display_order')
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'bundle': bundle,
         'items': items,
     }
-    
+
     return render(request, 'storefront/bundles/detail.html', context)
 
 @login_required
@@ -199,43 +242,51 @@ def bundle_detail(request, slug, bundle_id):
 def bundle_items(request, slug, bundle_id):
     """Manage bundle items"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    
-    items = bundle.items.select_related('product').order_by('display_order')
-    
-    if request.method == 'POST':
-        form = BundleItemForm(bundle, request.POST)
-        if form.is_valid():
-            item = form.save(commit=False)
-            item.bundle = bundle
-            item.save()
-            
-            # Add substitute options if any
-            substitute_ids = request.POST.getlist('substitute_options')
-            if substitute_ids:
-                substitutes = Listing.objects.filter(
-                    id__in=substitute_ids,
-                    store=store,
-                    is_active=True
-                )
-                item.substitute_options.set(substitutes)
-            
-            # Recalculate bundle price
-            bundle.save()  # This triggers price recalculation
-            
-            messages.success(request, 'Product added to bundle.')
-            return redirect('storefront:bundle_items', slug=slug, bundle_id=bundle.id)
-    else:
-        form = BundleItemForm(bundle)
-    
-    # Get available products for substitutes
-    available_products = Listing.objects.filter(
-        store=store,
-        is_active=True
-    ).exclude(
-        id__in=items.values_list('product_id', flat=True)
-    )
-    
+
+    try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
+        items = bundle.items.select_related('product').order_by('display_order')
+
+        if request.method == 'POST':
+            form = BundleItemForm(bundle, request.POST)
+            if form.is_valid():
+                item = form.save(commit=False)
+                item.bundle = bundle
+                item.save()
+
+                # Add substitute options if any
+                substitute_ids = request.POST.getlist('substitute_options')
+                if substitute_ids:
+                    substitutes = Listing.objects.filter(
+                        id__in=substitute_ids,
+                        store=store,
+                        is_active=True
+                    )
+                    item.substitute_options.set(substitutes)
+
+                # Recalculate bundle price
+                bundle.save()  # This triggers price recalculation
+
+                messages.success(request, 'Product added to bundle.')
+                return redirect('storefront:bundle_items', slug=slug, bundle_id=bundle.id)
+        else:
+            form = BundleItemForm(bundle)
+
+        # Get available products for substitutes
+        available_products = Listing.objects.filter(
+            store=store,
+            is_active=True
+        ).exclude(
+            id__in=items.values_list('product_id', flat=True)
+        )
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'bundle': bundle,
@@ -243,7 +294,7 @@ def bundle_items(request, slug, bundle_id):
         'form': form,
         'available_products': available_products,
     }
-    
+
     return render(request, 'storefront/bundles/items.html', context)
 
 @require_POST
@@ -252,16 +303,25 @@ def bundle_items(request, slug, bundle_id):
 def bundle_item_delete(request, slug, bundle_id, item_id):
     """Delete item from bundle"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    item = get_object_or_404(BundleItem, id=item_id, bundle=bundle)
-    
-    item.delete()
-    
-    # Recalculate bundle price
-    bundle.save()
-    
-    messages.success(request, 'Item removed from bundle.')
-    return redirect('storefront:bundle_items', slug=slug, bundle_id=bundle.id)
+
+    try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
+        item = get_object_or_404(BundleItem, id=item_id, bundle=bundle)
+
+        item.delete()
+
+        # Recalculate bundle price
+        bundle.save()
+
+        messages.success(request, 'Item removed from bundle.')
+        return redirect('storefront:bundle_items', slug=slug, bundle_id=bundle.id)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
 
 @require_POST
 @login_required
@@ -269,15 +329,24 @@ def bundle_item_delete(request, slug, bundle_id, item_id):
 def bundle_toggle_active(request, slug, bundle_id):
     """Toggle bundle active status"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    
-    bundle.is_active = not bundle.is_active
-    bundle.save()
-    
-    status = "activated" if bundle.is_active else "deactivated"
-    messages.success(request, f'Bundle {status} successfully.')
-    
-    return redirect('storefront:bundle_detail', slug=slug, bundle_id=bundle.id)
+
+    try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
+
+        bundle.is_active = not bundle.is_active
+        bundle.save()
+
+        status = "activated" if bundle.is_active else "deactivated"
+        messages.success(request, f'Bundle {status} successfully.')
+
+        return redirect('storefront:bundle_detail', slug=slug, bundle_id=bundle.id)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
 
 @require_POST
 @login_required
@@ -285,12 +354,19 @@ def bundle_toggle_active(request, slug, bundle_id):
 def bundle_delete(request, slug, bundle_id):
     """Delete a bundle"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    
-    bundle.delete()
-    messages.success(request, 'Bundle deleted successfully.')
-    
-    return redirect('storefront:bundle_list', slug=slug)
+
+    try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
+        bundle.delete()
+        messages.success(request, 'Bundle deleted successfully.')
+        return redirect('storefront:bundle_list', slug=slug)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
 
 # Bundle Rules Views
 @login_required
@@ -298,27 +374,35 @@ def bundle_delete(request, slug, bundle_id):
 def bundle_rules(request, slug):
     """Manage bundle rules"""
     store = get_object_or_404(Store, slug=slug)
-    
-    rules = store.bundle_rules.all()
-    
-    if request.method == 'POST':
-        form = BundleRuleForm(store, request.POST)
-        if form.is_valid():
-            rule = form.save(commit=False)
-            rule.store = store
-            rule.save()
-            
-            messages.success(request, 'Bundle rule created successfully.')
-            return redirect('storefront:bundle_rules', slug=slug)
-    else:
-        form = BundleRuleForm(store)
-    
+
+    try:
+        rules = store.bundle_rules.all()
+
+        if request.method == 'POST':
+            form = BundleRuleForm(store, request.POST)
+            if form.is_valid():
+                rule = form.save(commit=False)
+                rule.store = store
+                rule.save()
+
+                messages.success(request, 'Bundle rule created successfully.')
+                return redirect('storefront:bundle_rules', slug=slug)
+        else:
+            form = BundleRuleForm(store)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'rules': rules,
         'form': form,
     }
-    
+
     return render(request, 'storefront/bundles/rules.html', context)
 
 @require_POST
@@ -327,12 +411,19 @@ def bundle_rules(request, slug):
 def bundle_rule_delete(request, slug, rule_id):
     """Delete bundle rule"""
     store = get_object_or_404(Store, slug=slug)
-    rule = get_object_or_404(BundleRule, id=rule_id, store=store)
-    
-    rule.delete()
-    messages.success(request, 'Bundle rule deleted successfully.')
-    
-    return redirect('storefront:bundle_rules', slug=slug)
+
+    try:
+        rule = get_object_or_404(BundleRule, id=rule_id, store=store)
+        rule.delete()
+        messages.success(request, 'Bundle rule deleted successfully.')
+        return redirect('storefront:bundle_rules', slug=slug)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
 
 # Upsell Products Views
 @login_required
@@ -340,26 +431,34 @@ def bundle_rule_delete(request, slug, rule_id):
 def upsell_products(request, slug):
     """Manage upsell products"""
     store = get_object_or_404(Store, slug=slug)
-    
-    upsells = UpsellProduct.objects.filter(
-        base_product__store=store
-    ).select_related('base_product', 'upsell_product')
-    
-    if request.method == 'POST':
-        form = UpsellProductForm(store, request.POST)
-        if form.is_valid():
-            upsell = form.save()
-            messages.success(request, 'Upsell product added successfully.')
-            return redirect('storefront:upsell_products', slug=slug)
-    else:
-        form = UpsellProductForm(store)
-    
+
+    try:
+        upsells = UpsellProduct.objects.filter(
+            base_product__store=store
+        ).select_related('base_product', 'upsell_product')
+
+        if request.method == 'POST':
+            form = UpsellProductForm(store, request.POST)
+            if form.is_valid():
+                upsell = form.save()
+                messages.success(request, 'Upsell product added successfully.')
+                return redirect('storefront:upsell_products', slug=slug)
+        else:
+            form = UpsellProductForm(store)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'upsells': upsells,
         'form': form,
     }
-    
+
     return render(request, 'storefront/bundles/upsells.html', context)
 
 @require_POST
@@ -368,12 +467,19 @@ def upsell_products(request, slug):
 def upsell_delete(request, slug, upsell_id):
     """Delete upsell product"""
     store = get_object_or_404(Store, slug=slug)
-    upsell = get_object_or_404(UpsellProduct, id=upsell_id, base_product__store=store)
-    
-    upsell.delete()
-    messages.success(request, 'Upsell product removed successfully.')
-    
-    return redirect('storefront:upsell_products', slug=slug)
+
+    try:
+        upsell = get_object_or_404(UpsellProduct, id=upsell_id, base_product__store=store)
+        upsell.delete()
+        messages.success(request, 'Upsell product removed successfully.')
+        return redirect('storefront:upsell_products', slug=slug)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
 
 # Product Templates Views
 @login_required
@@ -381,39 +487,47 @@ def upsell_delete(request, slug, upsell_id):
 def product_templates(request, slug):
     """Manage product templates"""
     store = get_object_or_404(Store, slug=slug)
-    
-    templates = store.product_templates.all()
-    
-    if request.method == 'POST':
-        form = ProductTemplateForm(store, request.user, request.POST)
-        if form.is_valid():
-            template = form.save()
-            
-            # Handle default images
-            image_ids = request.POST.getlist('default_images')
-            if image_ids:
-                from listings.models import ListingImage
-                images = ListingImage.objects.filter(id__in=image_ids)
-                template.default_images.set(images)
-            
-            messages.success(request, 'Product template created successfully.')
-            return redirect('storefront:product_templates', slug=slug)
-    else:
-        form = ProductTemplateForm(store, request.user)
-    
-    # Get available images for templates
-    from listings.models import ListingImage
-    available_images = ListingImage.objects.filter(
-        listing__store=store
-    ).distinct()[:50]
-    
+
+    try:
+        templates = store.product_templates.all()
+
+        if request.method == 'POST':
+            form = ProductTemplateForm(store, request.user, request.POST)
+            if form.is_valid():
+                template = form.save()
+
+                # Handle default images
+                image_ids = request.POST.getlist('default_images')
+                if image_ids:
+                    from listings.models import ListingImage
+                    images = ListingImage.objects.filter(id__in=image_ids)
+                    template.default_images.set(images)
+
+                messages.success(request, 'Product template created successfully.')
+                return redirect('storefront:product_templates', slug=slug)
+        else:
+            form = ProductTemplateForm(store, request.user)
+
+        # Get available images for templates
+        from listings.models import ListingImage
+        available_images = ListingImage.objects.filter(
+            listing__store=store
+        ).distinct()[:50]
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'templates': templates,
         'form': form,
         'available_images': available_images,
     }
-    
+
     return render(request, 'storefront/bundles/templates.html', context)
 
 @login_required
@@ -421,39 +535,47 @@ def product_templates(request, slug):
 def quick_product_create(request, slug):
     """Quick product creation from template"""
     store = get_object_or_404(Store, slug=slug)
-    
-    if request.method == 'POST':
-        form = QuickProductForm(store, request.POST)
-        if form.is_valid():
-            template = form.cleaned_data['template']
-            
-            # Prepare template variables
-            variables = {}
-            for key, value in request.POST.items():
-                if key.startswith('var_'):
-                    var_name = key[4:]  # Remove 'var_' prefix
-                    variables[var_name] = value
-            
-            # Add form data to variables
-            variables.update({
-                'title': form.cleaned_data.get('title', ''),
-                'price': form.cleaned_data.get('price'),
-                'stock': form.cleaned_data.get('stock'),
-            })
-            
-            # Create product from template
-            product = template.create_product(**variables)
-            
-            messages.success(request, f'Product "{product.title}" created successfully from template.')
-            return redirect('storefront:product_edit', pk=product.id)
-    else:
-        form = QuickProductForm(store)
-    
+
+    try:
+        if request.method == 'POST':
+            form = QuickProductForm(store, request.POST)
+            if form.is_valid():
+                template = form.cleaned_data['template']
+
+                # Prepare template variables
+                variables = {}
+                for key, value in request.POST.items():
+                    if key.startswith('var_'):
+                        var_name = key[4:]  # Remove 'var_' prefix
+                        variables[var_name] = value
+
+                # Add form data to variables
+                variables.update({
+                    'title': form.cleaned_data.get('title', ''),
+                    'price': form.cleaned_data.get('price'),
+                    'stock': form.cleaned_data.get('stock'),
+                })
+
+                # Create product from template
+                product = template.create_product(**variables)
+
+                messages.success(request, f'Product "{product.title}" created successfully from template.')
+                return redirect('storefront:product_edit', pk=product.id)
+        else:
+            form = QuickProductForm(store)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
+
     context = {
         'store': store,
         'form': form,
     }
-    
+
     return render(request, 'storefront/bundles/quick_create.html', context)
 
 @require_GET
@@ -462,21 +584,25 @@ def quick_product_create(request, slug):
 def get_template_variables(request, slug, template_id):
     """Get template variables for a template (AJAX)"""
     store = get_object_or_404(Store, slug=slug)
-    template = get_object_or_404(ProductTemplate, id=template_id, store=store)
-    
-    # Extract variables from title template
-    import re
-    variables = re.findall(r'\{(\w+)\}', template.title_template)
-    
-    return JsonResponse({
-        'variables': variables,
-        'template': {
-            'title_template': template.title_template,
-            'description_template': template.description_template,
-            'price': str(template.price) if template.price else '',
-            'stock': template.stock,
-        }
-    })
+
+    try:
+        template = get_object_or_404(ProductTemplate, id=template_id, store=store)
+
+        # Extract variables from title template
+        import re
+        variables = re.findall(r'\{(\w+)\}', template.title_template)
+
+        return JsonResponse({
+            'variables': variables,
+            'template': {
+                'title_template': template.title_template,
+                'description_template': template.description_template,
+                'price': str(template.price) if template.price else '',
+                'stock': template.stock,
+            }
+        })
+    except (DatabaseError, OperationalError, ProgrammingError) as exc:
+        return JsonResponse({'error': 'Bundle tables not available. Run migrations.', 'detail': str(exc)}, status=503)
 
 @require_POST
 @login_required
@@ -484,12 +610,19 @@ def get_template_variables(request, slug, template_id):
 def template_delete(request, slug, template_id):
     """Delete product template"""
     store = get_object_or_404(Store, slug=slug)
-    template = get_object_or_404(ProductTemplate, id=template_id, store=store)
-    
-    template.delete()
-    messages.success(request, 'Template deleted successfully.')
-    
-    return redirect('storefront:product_templates', slug=slug)
+
+    try:
+        template = get_object_or_404(ProductTemplate, id=template_id, store=store)
+        template.delete()
+        messages.success(request, 'Template deleted successfully.')
+        return redirect('storefront:product_templates', slug=slug)
+    except (DatabaseError, OperationalError, ProgrammingError):
+        messages.warning(
+            request,
+            'Bundle tables are not available yet. '
+            'Run <code>python manage.py migrate</code> to apply pending migrations.',
+        )
+        return redirect('storefront:bundle_dashboard', slug=slug)
 
 # Bulk Image Upload
 @login_required
@@ -593,12 +726,12 @@ def product_recommendations(request, slug):
 def update_bundle_item_order(request, slug, bundle_id):
     """Update bundle item display order (AJAX)"""
     store = get_object_or_404(Store, slug=slug)
-    bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
-    
+
     try:
+        bundle = get_object_or_404(ProductBundle, id=bundle_id, store=store)
         data = json.loads(request.body)
         items = data.get('items', [])
-        
+
         with transaction.atomic():
             for item_data in items:
                 item = BundleItem.objects.get(
@@ -607,9 +740,11 @@ def update_bundle_item_order(request, slug, bundle_id):
                 )
                 item.display_order = item_data['order']
                 item.save()
-        
+
         return JsonResponse({'success': True})
-        
+
+    except (DatabaseError, OperationalError, ProgrammingError) as e:
+        return JsonResponse({'success': False, 'error': 'Bundle tables not available. Run migrations.'})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
@@ -619,11 +754,11 @@ def update_bundle_item_order(request, slug, bundle_id):
 def update_bundle_order(request, slug):
     """Update bundle display order (AJAX)"""
     store = get_object_or_404(Store, slug=slug)
-    
+
     try:
         data = json.loads(request.body)
         bundles = data.get('bundles', [])
-        
+
         with transaction.atomic():
             for bundle_data in bundles:
                 bundle = ProductBundle.objects.get(
@@ -632,8 +767,10 @@ def update_bundle_order(request, slug):
                 )
                 bundle.display_order = bundle_data['order']
                 bundle.save()
-        
+
         return JsonResponse({'success': True})
-        
+
+    except (DatabaseError, OperationalError, ProgrammingError) as e:
+        return JsonResponse({'success': False, 'error': 'Bundle tables not available. Run migrations.'})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
