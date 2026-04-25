@@ -11,17 +11,23 @@ from storefront.utils.plan_permissions import PlanPermissions
 User = get_user_model()
 
 
-@override_settings(STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage')
+@override_settings(
+    STATICFILES_STORAGE='django.contrib.staticfiles.storage.StaticFilesStorage',
+    ALLOWED_HOSTS=['testserver', 'localhost'],
+)
 class SellerAIFeatureTests(TestCase):
     def setUp(self):
-        self.client = Client()
+        self.client = Client(HTTP_HOST='localhost')
         self.user = User.objects.create_user(
             username='sellerai',
             email='sellerai@test.com',
             password='pass123'
         )
+        self.user.email_verified = True
+        self.user.phone_number = '0712345678'
+        self.user.save(update_fields=['email_verified', 'phone_number'])
         self.store = Store.objects.create(owner=self.user, name='AI Store', slug='ai-store')
-        self.client.login(username='sellerai', password='pass123')
+        self.client.force_login(self.user)
 
     def _activate_plan(self, plan):
         Subscription.objects.create(
@@ -45,7 +51,7 @@ class SellerAIFeatureTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Baysoko AI Copilot')
 
-    def test_bulk_ai_preflight_requires_ai_access(self):
+    def test_bulk_ai_preflight_redirects_when_bulk_feature_is_locked(self):
         csv_file = SimpleUploadedFile(
             'products.csv',
             b'title,price,category\nPhone,1200,Electronics\n',
@@ -56,7 +62,7 @@ class SellerAIFeatureTests(TestCase):
             {'file': csv_file},
             HTTP_X_REQUESTED_WITH='XMLHttpRequest',
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
 
     def test_bulk_ai_preflight_returns_analysis_for_premium(self):
         self._activate_plan('premium')

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import csv
 from io import BytesIO
+from itertools import islice
 
-import pandas as pd
 from django.db.models import DecimalField, F, Q, Sum
 from django.urls import reverse
 
@@ -68,26 +69,40 @@ def _guess_import_field(column_name: str) -> str:
     return ""
 
 
-def _preview_records(df: pd.DataFrame, limit: int = 5) -> list[dict]:
-    safe = df.head(limit).fillna("")
-    records = safe.to_dict(orient="records")
-    return [{str(k): str(v)[:120] for k, v in row.items()} for row in records]
-
-
-def _coerce_frame(uploaded_file) -> pd.DataFrame:
+def _coerce_table(uploaded_file) -> tuple[list[str], list[list[str]]]:
     filename = (uploaded_file.name or "").lower()
     raw_bytes = uploaded_file.read()
     uploaded_file.seek(0)
     if filename.endswith(".csv"):
-        return pd.read_csv(BytesIO(raw_bytes))
+        decoded = raw_bytes.decode("utf-8-sig", errors="replace")
+        rows = list(csv.reader(decoded.splitlines()))
+        if not rows:
+            return [], []
+        headers = [str(cell).strip() for cell in rows[0]]
+        data_rows = [[str(cell).strip() for cell in row] for row in rows[1:]]
+        return headers, data_rows
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
-        return pd.read_excel(BytesIO(raw_bytes))
+        try:
+            from openpyxl import load_workbook
+        except Exception as exc:
+            raise ValueError("Excel analysis requires openpyxl to be installed.") from exc
+        workbook = load_workbook(filename=BytesIO(raw_bytes), read_only=True, data_only=True)
+        sheet = workbook.active
+        row_iter = sheet.iter_rows(values_only=True)
+        try:
+            headers = [str(cell or "").strip() for cell in next(row_iter)]
+        except StopIteration:
+            return [], []
+        data_rows = []
+        for row in row_iter:
+            data_rows.append([str(cell or "").strip() for cell in row])
+        return headers, data_rows
     raise ValueError("Unsupported file format. Please upload CSV or Excel.")
 
 
 def run_bulk_import_preflight(uploaded_file) -> dict:
-    df = _coerce_frame(uploaded_file)
-    if df.empty:
+    columns, rows = _coerce_table(uploaded_file)
+    if not columns and not rows:
         return {
             "summary": "Your file is empty.",
             "columns": [],
@@ -98,7 +113,6 @@ def run_bulk_import_preflight(uploaded_file) -> dict:
             "stats": {"rows": 0, "columns": 0},
         }
 
-    columns = [str(col).strip() for col in df.columns]
     guessed_mapping = {column: _guess_import_field(column) for column in columns}
     mapped_fields = {value for value in guessed_mapping.values() if value}
     missing_required = [field for field in REQUIRED_IMPORT_FIELDS if field not in mapped_fields]
@@ -110,6 +124,7 @@ def run_bulk_import_preflight(uploaded_file) -> dict:
     price_col = next((c for c, field in guessed_mapping.items() if field == "price"), None)
     stock_col = next((c for c, field in guessed_mapping.items() if field == "stock"), None)
     image_cols = [c for c, field in guessed_mapping.items() if field in {"image_url", "image_urls"} or _normalize_column_name(c) in IMAGE_FIELD_ALIASES]
+    col_index = {column: index for index, column in enumerate(columns)}
 
     if missing_required:
         warnings.append(
@@ -119,55 +134,70 @@ def run_bulk_import_preflight(uploaded_file) -> dict:
         warnings.append("No image column was detected. Listings may import without product photos.")
         suggestions.append("Add an `image_url` column for the main image or `image_urls` for gallery images.")
 
-    if title_col and title_col in df.columns:
-        blank_titles = int(df[title_col].fillna("").astype(str).str.strip().eq("").sum())
+    if title_col and title_col in col_index:
+        title_idx = col_index[title_col]
+        blank_titles = sum(1 for row in rows if title_idx >= len(row) or not str(row[title_idx]).strip())
         if blank_titles:
             warnings.append(f"{blank_titles} row(s) have blank titles and are likely to fail import.")
 
-    if price_col and price_col in df.columns:
-        price_series = (
-            df[price_col]
-            .fillna("")
-            .astype(str)
-            .str.replace(r"[^0-9.\-]", "", regex=True)
-        )
-        invalid_prices = int(((price_series != "") & pd.to_numeric(price_series, errors="coerce").isna()).sum())
+    if price_col and price_col in col_index:
+        price_idx = col_index[price_col]
+        invalid_prices = 0
+        for row in rows:
+            if price_idx >= len(row):
+                continue
+            raw_price = str(row[price_idx]).strip()
+            cleaned = "".join(ch for ch in raw_price if ch.isdigit() or ch in ".-")
+            if raw_price:
+                if not cleaned:
+                    invalid_prices += 1
+                    continue
+                try:
+                    float(cleaned)
+                except Exception:
+                    invalid_prices += 1
         if invalid_prices:
             warnings.append(f"{invalid_prices} row(s) have prices that do not look numeric.")
             suggestions.append("Remove currency symbols or extra text from price cells before importing.")
 
-    if stock_col and stock_col in df.columns:
-        stock_series = df[stock_col].fillna("").astype(str).str.replace(r"[^0-9\-]", "", regex=True)
-        invalid_stock = int(((stock_series != "") & pd.to_numeric(stock_series, errors="coerce").isna()).sum())
+    if stock_col and stock_col in col_index:
+        stock_idx = col_index[stock_col]
+        invalid_stock = 0
+        for row in rows:
+            if stock_idx >= len(row):
+                continue
+            raw_stock = str(row[stock_idx]).strip()
+            cleaned = "".join(ch for ch in raw_stock if ch.isdigit() or ch == "-")
+            if raw_stock:
+                if not cleaned:
+                    invalid_stock += 1
+                    continue
+                try:
+                    int(cleaned)
+                except Exception:
+                    invalid_stock += 1
         if invalid_stock:
             warnings.append(f"{invalid_stock} row(s) have stock values that do not look numeric.")
 
     image_coverage = 0
     if image_cols:
-        image_coverage = int(
-            (
-                df[image_cols]
-                .fillna("")
-                .astype(str)
-                .apply(lambda column: column.str.strip())
-                .replace("", pd.NA)
-                .notna()
-                .any(axis=1)
-                .sum()
-            )
-        )
-        if image_coverage < len(df):
+        image_indexes = [col_index[column] for column in image_cols if column in col_index]
+        for row in rows:
+            has_image = any(idx < len(row) and str(row[idx]).strip() for idx in image_indexes)
+            if has_image:
+                image_coverage += 1
+        if image_coverage < len(rows):
             suggestions.append(
-                f"Only {image_coverage} of {len(df)} row(s) appear to contain images. Consider filling missing image URLs."
+                f"Only {image_coverage} of {len(rows)} row(s) appear to contain images. Consider filling missing image URLs."
             )
 
     confidence_score = 100
     confidence_score -= min(45, len(missing_required) * 15)
     confidence_score -= min(25, len(warnings) * 5)
-    confidence_score = max(confidence_score, 35 if len(df) else 0)
+    confidence_score = max(confidence_score, 35 if len(rows) else 0)
 
     summary = (
-        f"Preflight reviewed {len(df)} row(s) across {len(columns)} column(s). "
+        f"Preflight reviewed {len(rows)} row(s) across {len(columns)} column(s). "
         f"Import confidence is {confidence_score}% based on required fields, images, and data cleanliness."
     )
     if confidence_score >= 85:
@@ -180,12 +210,15 @@ def run_bulk_import_preflight(uploaded_file) -> dict:
     return {
         "summary": summary,
         "columns": columns,
-        "preview": _preview_records(df),
+        "preview": [
+            {columns[idx] if idx < len(columns) else f"Column {idx + 1}": str(value)[:120] for idx, value in enumerate(row[: len(columns)])}
+            for row in islice(rows, 0, 5)
+        ],
         "warnings": warnings,
         "suggestions": suggestions,
         "field_mapping": guessed_mapping,
         "stats": {
-            "rows": int(len(df)),
+            "rows": int(len(rows)),
             "columns": int(len(columns)),
             "image_coverage": image_coverage,
             "confidence_score": confidence_score,
