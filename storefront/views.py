@@ -10,7 +10,7 @@ from django.db.models import F, Sum, Count, Avg, Q
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import transaction, DatabaseError, OperationalError, ProgrammingError
 from datetime import timedelta, datetime
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -19,6 +19,7 @@ import logging
 from decimal import Decimal
 from collections import defaultdict
 from .decorators import store_owner_required, analytics_access_required, store_limit_check
+from .utils.db import safe_db_query
 from .models import Store, Subscription, MpesaPayment, StockMovement, StoreReview, WithdrawalRequest, StoreVideo
 from .models import PayoutVerification
 from .mpesa import MpesaGateway
@@ -183,60 +184,89 @@ def product_detail(request, store_slug, slug):
 @login_required
 def seller_dashboard(request):
     from .utils.plan_permissions import PlanPermissions
-    
-    # Get visible stores based on plan
-    stores = PlanPermissions.get_visible_stores(request.user)
-    
-    # Get visible listings based on plan
-    user_listings = PlanPermissions.get_visible_listings(request.user)
-    
-    # Compute metrics only for visible stores/listings
-    total_listings = user_listings.count()
-    stores_list = None
 
-    # If `stores` is a plain list, compute metrics directly. If it's a QuerySet,
-    # attempt to use DB aggregation, but fall back to converting to a list if the
-    # QuerySet has been sliced (filtering a sliced queryset raises TypeError).
-    if isinstance(stores, list):
-        stores_list = stores
-        premium_stores = sum(1 for store in stores_list if store.is_premium)
-        store_views_sum = sum(getattr(store, 'total_views', 0) for store in stores_list)
-    else:
-        try:
-            premium_stores = stores.filter(is_premium=True).count()
-            store_views_sum = stores.aggregate(total=Sum('total_views'))['total'] or 0
-        except TypeError:
-            # Likely a sliced QuerySet — convert to list and compute in Python
-            stores_list = list(stores)
-            premium_stores = sum(1 for store in stores_list if getattr(store, 'is_premium', False))
-            store_views_sum = sum(getattr(store, 'total_views', 0) for store in stores_list)
-    
-    listing_views_sum = user_listings.aggregate(total=Sum('views'))['total'] or 0
-    total_views = store_views_sum + listing_views_sum
-
-    # Get plan limits for display
-    limits = PlanPermissions.get_plan_limits(request.user)
-    # Use the plan's max_products when present; otherwise fall back to global setting (default free limit)
-    free_limit = limits.get('max_products')
-    if free_limit is None:
-        free_limit = getattr(settings, 'STORE_FREE_LISTING_LIMIT', 5)
     try:
-        free_limit = int(free_limit)
-    except Exception:
+        # Get visible stores based on plan
+        stores = PlanPermissions.get_visible_stores(request.user)
+
+        # Get visible listings based on plan
+        user_listings = PlanPermissions.get_visible_listings(request.user)
+
+        # Compute metrics only for visible stores/listings
+        total_listings = user_listings.count()
+        stores_list = None
+
+        # If `stores` is a plain list, compute metrics directly. If it's a QuerySet,
+        # attempt to use DB aggregation, but fall back to converting to a list if the
+        # QuerySet has been sliced (filtering a sliced queryset raises TypeError).
+        if isinstance(stores, list):
+            stores_list = stores
+            premium_stores = sum(1 for store in stores_list if store.is_premium)
+            store_views_sum = sum(getattr(store, 'total_views', 0) for store in stores_list)
+        else:
+            try:
+                premium_stores = stores.filter(is_premium=True).count()
+                store_views_sum = stores.aggregate(total=Sum('total_views'))['total'] or 0
+            except TypeError:
+                # Likely a sliced QuerySet — convert to list and compute in Python
+                stores_list = list(stores)
+                premium_stores = sum(1 for store in stores_list if getattr(store, 'is_premium', False))
+                store_views_sum = sum(getattr(store, 'total_views', 0) for store in stores_list)
+
+        listing_views_sum = user_listings.aggregate(total=Sum('views'))['total'] or 0
+        total_views = store_views_sum + listing_views_sum
+
+        # Get plan limits for display
+        limits = PlanPermissions.get_plan_limits(request.user)
+        # Use the plan's max_products when present; otherwise fall back to global setting (default free limit)
+        free_limit = limits.get('max_products')
+        if free_limit is None:
+            free_limit = getattr(settings, 'STORE_FREE_LISTING_LIMIT', 5)
+        try:
+            free_limit = int(free_limit)
+        except Exception:
+            free_limit = getattr(settings, 'STORE_FREE_LISTING_LIMIT', 5)
+
+        remaining = max(free_limit - total_listings, 0)
+        percentage_used = (total_listings / free_limit * 100) if free_limit > 0 else 0
+
+        # `get_visible_stores` may return a QuerySet, a sliced QuerySet, or a list.
+        # Prefer using the already-converted `stores_list` when available.
+        if stores_list is not None:
+            store_with_slug = next((s for s in stores_list if getattr(s, 'slug', None)), None)
+        else:
+            store_with_slug = stores.filter(slug__isnull=False).exclude(slug='').first()
+
+        ai_store = store_with_slug or (stores[0] if isinstance(stores, list) and stores else None)
+        seller_ai = build_seller_copilot_context(request.user, store=ai_store)
+        seller_ai_access = has_seller_ai_access(request.user, store=ai_store)
+        plan_status = PlanPermissions.get_user_plan_status(request.user)
+
+    except (DatabaseError, OperationalError, ProgrammingError) as exc:
+        # One or more database tables are missing (migrations not yet applied).
+        # Render the dashboard with safe defaults and guide the user to run migrations.
+        logger.warning(
+            'seller_dashboard: database error — some tables may be missing. '
+            'Run migrations. Error: %s', exc,
+        )
+        messages.warning(
+            request,
+            'Some dashboard data is unavailable because database migrations have not been applied. '
+            'Run <code>python manage.py migrate</code> to fix this.',
+        )
+        stores = []
+        user_listings = []
+        total_listings = 0
+        premium_stores = 0
+        total_views = 0
         free_limit = getattr(settings, 'STORE_FREE_LISTING_LIMIT', 5)
-
-    remaining = max(free_limit - total_listings, 0)
-    percentage_used = (total_listings / free_limit * 100) if free_limit > 0 else 0
-
-    # `get_visible_stores` may return a QuerySet, a sliced QuerySet, or a list.
-    # Prefer using the already-converted `stores_list` when available.
-    if stores_list is not None:
-        store_with_slug = next((s for s in stores_list if getattr(s, 'slug', None)), None)
-    else:
-        store_with_slug = stores.filter(slug__isnull=False).exclude(slug='').first()
-
-    ai_store = store_with_slug or (stores[0] if isinstance(stores, list) and stores else None)
-    seller_ai = build_seller_copilot_context(request.user, store=ai_store)
+        remaining = free_limit
+        percentage_used = 0
+        store_with_slug = None
+        limits = {}
+        plan_status = {}
+        seller_ai = {}
+        seller_ai_access = False
 
     return render(request, 'storefront/dashboard.html', {
         'stores': stores,
@@ -249,9 +279,9 @@ def seller_dashboard(request):
         'user_listings': user_listings,
         'store_with_slug': store_with_slug,
         'plan_limits': limits,
-        'plan_status': PlanPermissions.get_user_plan_status(request.user),
+        'plan_status': plan_status,
         'seller_ai': seller_ai,
-        'seller_ai_access': has_seller_ai_access(request.user, store=ai_store),
+        'seller_ai_access': seller_ai_access,
     })
 
 @login_required
